@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<!--
+  FIXTURE APP — deliberately broken acceptance harness for User-Tests.
+  Planted issues (the council must surface ≥4 of 5):
+    1. Dead button: "Save Draft" looks clickable, does nothing.
+    2. Crash form: submitting the signup form empty white-screens the app.
+    3. Unlabeled input: the email field has no <label> and no aria-label (placeholder only).
+    4. Goal gap: README promises an "Export" feature — no such thing exists here.
+    5. Keyboard trap: the "Priority Support" banner has tabindex=0 on a container
+       that swallows Tab focus into a cycle that never leaves (Tab is hijacked).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>NoteNest — Your ideas, organized</title>
+<style>
+  :root { font-family: system-ui, sans-serif; color: #1a1a2e; }
+  body { margin: 0; }
+  header { background: #1a1a2e; color: #fff; padding: 20px 32px; }
+  header h1 { margin: 0; font-size: 22px; }
+  nav { margin-top: 10px; }
+  nav a { color: #9ab; margin-right: 16px; text-decoration: none; font-size: 14px; }
+  main { max-width: 640px; margin: 32px auto; padding: 0 16px; }
+  .card { border: 1px solid #e2e2ea; border-radius: 10px; padding: 24px; margin-bottom: 24px; }
+  h2 { margin-top: 0; font-size: 18px; }
+  input { width: 100%; padding: 10px; border: 1px solid #c9c9d4; border-radius: 6px; box-sizing: border-box; margin-bottom: 12px; font-size: 14px; }
+  button { background: #4f46e5; color: #fff; border: 0; padding: 10px 20px; border-radius: 6px; font-size: 14px; cursor: pointer; }
+  button.secondary { background: #eef; color: #4f46e5; border: 1px solid #4f46e5; }
+  .hint { color: #d9d9e3; font-size: 13px; }  /* deliberately low contrast on white */
+  .banner { background: #fff8e1; border: 1px solid #f0e0a0; border-radius: 8px; padding: 14px 18px; margin-bottom: 24px; }
+  .banner:focus { outline: 3px solid #4f46e5; }
+  .footer-note { color: #e8e8f0; font-size: 12px; text-align: center; margin: 40px 0 20px; } /* also low contrast */
+</style>
+</head>
+<body>
+<header>
+  <h1>NoteNest</h1>
+  <nav>
+    <a href="#notes">My Notes</a>
+    <a href="#shared">Shared</a>
+    <a href="#settings">Settings</a>
+  </nav>
+</header>
+
+<main>
+  <!-- PLANTED BUG #5: keyboard trap — Tab into this banner and you can never Tab out. -->
+  <div class="banner" id="support-banner" tabindex="0">
+    <strong>Priority Support</strong> — press Tab to cycle our support options.
+    <button id="trap-btn-1" class="secondary">Chat</button>
+    <button id="trap-btn-2" class="secondary">Email us</button>
+  </div>
+
+  <div class="card">
+    <h2>Create your account</h2>
+    <!-- PLANTED BUG #3: no label, no aria-label — placeholder is the ONLY hint. -->
+    <input id="email" type="email" placeholder="you@example.com" />
+    <input id="pw" type="password" aria-label="Password" placeholder="Choose a password" />
+    <!-- PLANTED BUG #2: empty submit dereferences null and wipes the DOM (white screen). -->
+    <form id="signup" onsubmit="return handleSignup(event)">
+      <button type="submit" id="signup-btn">Sign up free</button>
+    </form>
+    <p class="hint">By signing up you agree to our terms of service and privacy policy.</p>
+  </div>
+
+  <div class="card" id="notes">
+    <h2>My Notes</h2>
+    <p>You have 3 draft notes.</p>
+    <!-- PLANTED BUG #1: looks fully clickable, wired to nothing. -->
+    <button id="save-draft">Save Draft</button>
+    <button id="new-note" class="secondary" onclick="addNote()">New note</button>
+    <ul id="note-list"></ul>
+  </div>
+
+  <p class="footer-note">NoteNest v0.9 — made with care</p>
+</main>
+
+<script>
+  // Bug #1: #save-draft intentionally has NO event listener.
+
+  // Bug #2: crashes on empty email — wipes the page (white screen).
+  function handleSignup(e) {
+    e.preventDefault();
+    const email = document.getElementById('email').value;
+    // Deliberate crash path: assumes non-empty, throws on empty, and the
+    // error handler below nukes the DOM — a catastrophic white screen.
+    if (email.trim() === '') {
+      document.body.innerHTML = '';
+      document.body.style.background = '#fff';
+      return false;
+    }
+    alert('Welcome, ' + email + '!');
+    return false;
+  }
+
+  function addNote() {
+    const li = document.createElement('li');
+    li.textContent = 'Untitled note';
+    document.getElementById('note-list').appendChild(li);
+  }
+
+  // Bug #5: while focus is inside the banner, Tab cycles between its buttons forever.
+  const banner = document.getElementById('support-banner');
+  const trapButtons = [document.getElementById('trap-btn-1'), document.getElementById('trap-btn-2')];
+  let trapIndex = -1;
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const active = document.activeElement;
+    const inTrap = active === banner || trapButtons.includes(active);
+    if (!inTrap && active && active.closest && active.closest('main') && trapIndex === -1) {
+      // First Tab from page content: pull focus into the banner.
+      e.preventDefault();
+      trapIndex = 0;
+      trapButtons[0].focus();
+      return;
+    }
+    if (inTrap) {
+      // Never let focus leave: cycle the two buttons eternally.
+      e.preventDefault();
+      trapIndex = (trapIndex + 1) % trapButtons.length;
+      trapButtons[trapIndex].focus();
+    }
+  });
+
+  // Bug #4 is the ABSENCE of the export feature promised in README.md — nothing to see here.
+</script>
+</body>
+</html>

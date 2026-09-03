@@ -1,0 +1,30 @@
+target: http://localhost:3000      # overridable by CLI flag
+repo_path: .                       # context source for goal-gap-auditor
+max_steps_per_agent: 30
+viewport: { width: 1440, height: 900 }
+# full_page_screenshots: true   # default false = viewport-only shots
+
+# Safety rails — the run stops cleanly (chair still reports partial results)
+# when any cap is hit. All optional; these are the defaults.
+limits:
+  max_llm_calls: 150        # hard cap on LLM calls per run (retries count)
+  # max_cost_usd: 2.00      # hard USD budget per run; omit for no cost cap
+  max_run_minutes: 45       # wall-clock limit for the whole run
+  llm_timeout_seconds: 120  # timeout for a single LLM call
+  keep_runs: 20             # prune older run folders after each run
+
+council:
+  testers:
+    - persona: first-time-user
+      harshness: 4
+    - persona: goal-gap-auditor
+      harshness: 5
+    - persona: chaos-hunter
+      harshness: 8
+    - persona: a11y-polish
+      harshness: 3
+  chair:
+    verify_repro: true
+    min_severity_to_verify: major   # critical + major get repro-verified; minor reported as "unverified"
+    max_findings_per_run: 25
+    # false_positive_pruning: true  # default true: drop replay-confirmed findings contradicted by the replay snapshot

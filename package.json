@@ -1,0 +1,32 @@
+{
+  "name": "user-tests",
+  "version": "0.1.0",
+  "description": "A council of LLM-driven agent personas that user-test a locally running web app and produce a single REPORT.md.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "usertests": "dist/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "smoke": "tsx scripts/smoke.ts",
+    "acceptance": "npm run build && tsx scripts/acceptance.ts",
+    "start": "node dist/cli.js",
+    "fixture:serve": "node scripts/serve-fixture.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.5",
+    "playwright": "^1.49.0",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
