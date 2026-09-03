@@ -130,8 +130,10 @@ The council's `REPORT.md` must surface at least 4 of the 5.
 
 `npm run acceptance` is the harness: run it before pushing any change to
 `src/` or `personas/` — it proves the council still surfaces ≥4 of the 5
-planted fixture issues. Wire it into a pre-push hook or CI job if you want it
-enforced automatically.
+planted fixture issues. A pre-push hook (`.git/hooks/pre-push`) runs it
+automatically when council code, personas, config, or the fixture change;
+bypass a failing gate deliberately with
+`USERTESTS_SKIP_ACCEPTANCE=1 git push`.
 
 ## Configuration (`council.config.yaml`)
 
