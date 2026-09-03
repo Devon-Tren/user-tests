@@ -8,7 +8,7 @@
  * A persona crash, budget cap, or wall-clock deadline never loses the run:
  * the chair still runs on partial results and the report is marked PARTIAL.
  */
-import { Command } from "commander";
+import { Command, Argument } from "commander";
 import { config as loadEnv } from "dotenv";
 import { mkdirSync, readFileSync, readdirSync, rmSync, watch, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -397,10 +397,14 @@ program
 
 program
   .command("ask")
-  .argument("<question>", 'question about a run, e.g. "did anyone test the settings page?"')
+  .addArgument(new Argument("[question...]", 'question about a run — quoting optional: usertests ask did anyone test settings'))
   .option("--run <path>", "run folder (default: latest run in runs/)")
-  .action(async (question: string, opts: { run?: string }) => {
+  .action(async (questionParts: string[], opts: { run?: string }) => {
     const log = (msg: string) => console.log(`[usertests] ${msg}`);
+    const question = (questionParts ?? []).join(" ").trim();
+    if (!question) {
+      throw new Error('Usage: usertests ask <question>  — e.g. usertests ask "did anyone test the settings page?"');
+    }
     let runDir = opts.run;
     if (!runDir) {
       const runsDir = path.join(PROJECT_ROOT, "runs");
