@@ -58,6 +58,8 @@ interface ProviderConfig {
 const PRICES: Record<string, { input: number; output: number }> = {
   "claude-sonnet-4-5": { input: 3, output: 15 },
   "gpt-4o": { input: 2.5, output: 10 },
+  "gpt-4.1": { input: 2, output: 8 },
+  "gpt-4.1-mini": { input: 0.4, output: 1.6 },
 };
 
 export function estimateCostUsd(
@@ -75,7 +77,7 @@ export function currentModel(): { provider: Provider; model: string } {
   const providerRaw = (process.env.USERTESTS_PROVIDER ?? "anthropic").toLowerCase();
   const provider: Provider = providerRaw === "openai" ? "openai" : "anthropic";
   const model =
-    process.env.USERTESTS_MODEL ?? (provider === "anthropic" ? "claude-sonnet-4-5" : "gpt-4o");
+    process.env.USERTESTS_MODEL ?? (provider === "anthropic" ? "claude-sonnet-4-5" : "gpt-4.1");
   return { provider, model };
 }
 
@@ -140,13 +142,15 @@ function checkBudget(): void {
 // ---------------------------------------------------------------------------
 
 const MAX_ATTEMPTS = 3;
+/** Rate limits get more patience (low-tier keys have tight per-minute limits). */
+const MAX_ATTEMPTS_429 = 5;
 
 /** Transient = network flakes, timeouts, 429s, 5xx. 4xx auth/validation errors are terminal. */
 function isTransient(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   const status = (err as { status?: number })?.status;
   if (status === 429 || (status !== undefined && status >= 500)) return true;
-  return /ECONNRESET|ETIMEDOUT|ENOTFOUND|socket hang up|fetch failed|overloaded|timed?\s*out|abort/i.test(
+  return /ECONNRESET|ETIMEDOUT|ENOTFOUND|socket hang up|fetch failed|overloaded|empty response|timed?\s*out|abort/i.test(
     msg
   );
 }
@@ -166,9 +170,12 @@ function retryAfterMs(err: unknown): number | null {
 }
 
 function backoffMs(attempt: number, err: unknown): number {
+  const status = (err as { status?: number })?.status;
   const fromServer = retryAfterMs(err);
-  if (fromServer !== null) return Math.min(fromServer, 30_000);
-  const base = 1000 * Math.pow(4, attempt - 1); // 1s, 4s
+  if (fromServer !== null) return Math.min(fromServer, status === 429 ? 60_000 : 30_000);
+  // Rate limits without Retry-After need real breathing room (5s, 15s, 45s),
+  // not the generic 1s/4s used for network flakes.
+  const base = status === 429 ? 5000 * Math.pow(3, attempt - 1) : 1000 * Math.pow(4, attempt - 1);
   const jitter = base * 0.25 * (Math.random() * 2 - 1);
   return Math.max(100, base + jitter);
 }
@@ -294,7 +301,7 @@ export async function callLLM(req: LLMRequest): Promise<LLMResponse> {
 
   let lastError: unknown;
   let attempt = 0;
-  for (attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+  for (attempt = 1; ; attempt++) {
     checkBudget(); // throws BudgetExceededError — never retried
     callsMade += 1;
     const start = Date.now();
@@ -306,7 +313,9 @@ export async function callLLM(req: LLMRequest): Promise<LLMResponse> {
       return { ...raw, provider: cfg.provider, model: cfg.model, costUsd, durationMs };
     } catch (e) {
       lastError = e;
-      if (!isTransient(e) || attempt === MAX_ATTEMPTS) break;
+      const maxAttempts =
+        (e as { status?: number })?.status === 429 ? MAX_ATTEMPTS_429 : MAX_ATTEMPTS;
+      if (!isTransient(e) || attempt >= maxAttempts) break;
       await sleep(backoffMs(attempt, e));
     }
   }

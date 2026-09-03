@@ -75,6 +75,7 @@ When you observe something worth reporting, include a "finding" object in your J
   "expected": "what should happen",
   "actual": "what actually happens"
 }
+CRITICAL: describing an issue in "reasoning" does NOT file it — only the finding object does. If your reasoning states a gap, bug, or confusion, the SAME reply must carry the finding object.
 Severity guide: critical = data loss / crash / completely blocked task; major = feature broken or seriously misleading; minor = polish, papercut, small confusion.`;
 
 interface LLMDecision {
@@ -108,7 +109,7 @@ Reply with ONE JSON object only, no prose around it:
   "params": { "url"?, "selector"?, "text"?, "key"?, "direction"? },
   "reasoning": "what you intend and why (narrate like a user thinking out loud)",
   "finding"?: { …schema above… } }
-Pick selectors ONLY from the ELEMENTS list you are shown. Return {"action":"done"} when your persona has seen enough.`;
+Pick selectors ONLY from the ELEMENTS list you are shown. Return {"action":"done"} only when your persona's instructions say your checklist is complete — ending early wastes the run.`;
 }
 
 /** Extract the first JSON object from an LLM reply that may contain markdown fences or chatter. */
@@ -198,6 +199,46 @@ export async function runTester(opts: TesterOptions): Promise<TesterResult> {
   const history: string[] = [];
   let stoppedReason: TesterResult["stoppedReason"];
 
+  // --- Duplicate-finding guard (code-level; LLMs re-report the same issue
+  // with slightly different wording every step otherwise) ---
+  const normTokens = (s: string) =>
+    new Set(s.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(Boolean));
+  const jaccard = (a: Set<string>, b: Set<string>) => {
+    let inter = 0;
+    for (const t of a) if (b.has(t)) inter++;
+    return inter / (a.size + b.size - inter);
+  };
+  const filedTokenSets: Set<string>[] = [];
+
+  /** File a finding: dedupe vs this persona's already-filed titles, attach evidence, log. Returns null if dropped as duplicate. */
+  const recordFinding = async (step: number, data: Omit<Finding, "atStep">): Promise<Finding | null> => {
+    const tokens = normTokens(data.title);
+    if (filedTokenSets.some((fs) => jaccard(fs, tokens) > 0.6)) {
+      opts.onProgress?.(`duplicate finding skipped: ${data.title}`);
+      return null;
+    }
+    filedTokenSets.push(tokens);
+    let shot = data.screenshot;
+    if (!shot) {
+      try {
+        shot = await runner.saveFindingScreenshot(`${opts.personaName}-s${step}-${data.title}`);
+      } catch {
+        shot = undefined; // evidence is nice-to-have; the finding stands on its steps
+      }
+    }
+    const finding: Finding = { ...data, screenshot: shot, atStep: step };
+    findings.push(finding);
+    opts.logger?.event("finding", {
+      persona: opts.personaName,
+      step,
+      severity: finding.severity,
+      category: finding.category,
+      title: finding.title,
+    });
+    opts.onProgress?.(`finding [${finding.severity}/${finding.category}] ${finding.title}`);
+    return finding;
+  };
+
   /** One LLM round-trip + structured usage logging. BudgetExceededError propagates. */
   const ask = async (step: number, userPrompt: string, screenshot: Buffer): Promise<string> => {
     const resp = await callLLM({ system, user: userPrompt, images: [screenshot] });
@@ -217,6 +258,17 @@ export async function runTester(opts: TesterOptions): Promise<TesterResult> {
   // Step 0: land on the target.
   const first = await runner.act(0, "goto", { url: opts.target });
   history.push(`Step 0: goto ${opts.target} → ${first.ok ? "ok" : `FAILED: ${first.error}`}`);
+
+  /** Persist whatever this persona has gathered — called on success AND on crash. */
+  const persist = () => {
+    const findingsDir = path.join(opts.runDir, "findings");
+    mkdirSync(findingsDir, { recursive: true });
+    writeFileSync(
+      path.join(findingsDir, `${opts.personaName}.json`),
+      JSON.stringify({ persona: opts.personaName, steps, findings }, null, 2)
+    );
+    runner.saveLog(path.join(findingsDir, `${opts.personaName}.actions.json`));
+  };
 
   try {
   for (let step = 1; step <= opts.maxSteps; step++) {
@@ -261,6 +313,21 @@ export async function runTester(opts: TesterOptions): Promise<TesterResult> {
     }
 
     if (decision.action === "done") {
+      // CLOSING SWEEP: models routinely analyze a gap in "reasoning" but forget
+      // to attach the finding object. Ask for any confirmed-but-unfiled issues
+      // (max 2 rounds; the filed list is shown so nothing is double-counted).
+      for (let round = 0; round < 2; round++) {
+        const filedList = findings.map((f) => f.title).join("; ") || "(none yet)";
+        const sweepPrompt =
+          `${userPrompt}\n\nCLOSING SWEEP: you are about to finish. Issues you have ALREADY FILED: ${filedList}.` +
+          `\nIf you OBSERVED any other issue that you did NOT file yet (a gap you confirmed, a button that did nothing, a crash, a barrier), reply with ONE JSON object: {"action":"done","finding":{...the finding schema...}}.` +
+          `\nIf everything observed is already filed, reply with {"action":"done"}.`;
+        const sweepRaw = await ask(step, sweepPrompt, screenshot);
+        const sweepDecision = validateDecision(extractJson(sweepRaw));
+        if (!sweepDecision || sweepDecision.action !== "done" || !sweepDecision.finding) break;
+        const finding = await recordFinding(step, sweepDecision.finding);
+        if (finding) history.push(`Step ${step}: filed closing-sweep finding "${finding.title}"`);
+      }
       steps.push({ step, action: "done", reasoning: decision.reasoning });
       opts.onProgress?.(`done at step ${step}`);
       break;
@@ -278,28 +345,8 @@ export async function runTester(opts: TesterOptions): Promise<TesterResult> {
     };
 
     if (decision.finding) {
-      // Attach a screenshot as evidence if the LLM didn't reference one.
-      let shot = decision.finding.screenshot;
-      if (!shot) {
-        try {
-          shot = await runner.saveFindingScreenshot(
-            `${opts.personaName}-s${step}-${decision.finding.title}`
-          );
-        } catch {
-          shot = undefined; // evidence is nice-to-have; the finding stands on its steps
-        }
-      }
-      const finding: Finding = { ...decision.finding, screenshot: shot, atStep: step };
-      findings.push(finding);
-      record.finding = finding;
-      opts.logger?.event("finding", {
-        persona: opts.personaName,
-        step,
-        severity: finding.severity,
-        category: finding.category,
-        title: finding.title,
-      });
-      opts.onProgress?.(`finding [${finding.severity}/${finding.category}] ${finding.title}`);
+      const finding = await recordFinding(step, decision.finding);
+      if (finding) record.finding = finding;
     }
 
     steps.push(record);
@@ -318,17 +365,14 @@ export async function runTester(opts: TesterOptions): Promise<TesterResult> {
       opts.logger?.event("budget", { persona: opts.personaName, reason: e.message });
       opts.onProgress?.(`stopped: ${e.message}`);
     } else {
+      // Unexpected crash (network, rate limit, provider outage): keep whatever
+      // this persona had already gathered — never silently lose tester work.
+      persist();
       throw e;
     }
   }
 
-  const findingsDir = path.join(opts.runDir, "findings");
-  mkdirSync(findingsDir, { recursive: true });
-  writeFileSync(
-    path.join(findingsDir, `${opts.personaName}.json`),
-    JSON.stringify({ persona: opts.personaName, steps, findings }, null, 2)
-  );
-  runner.saveLog(path.join(findingsDir, `${opts.personaName}.actions.json`));
+  persist();
 
   return { persona: opts.personaName, steps, findings, stoppedReason };
 }

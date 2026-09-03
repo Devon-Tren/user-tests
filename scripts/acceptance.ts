@@ -9,9 +9,12 @@
  * Exits 0 on ≥4/5 found, 1 otherwise.
  */
 import { spawn, type ChildProcess } from "node:child_process";
+import { config as loadEnv } from "dotenv";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+loadEnv(); // .env is optional; real env vars always win
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURE_PORT = 4173;
