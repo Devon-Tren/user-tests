@@ -43,6 +43,20 @@ Or, after `npm link`, use the `usertests` binary directly:
 usertests run --target http://localhost:3000 --repo ./path/to/project
 ```
 
+**Run it from inside YOUR project** — the tool treats your current directory
+as the repo under test, picks up `./council.config.yaml` if you keep one
+there, falls back to the tool's own config and `.env` (API key), and when
+`--target` is omitted it auto-detects your dev server by probing common
+ports (if several servers answer, it asks you to pick):
+
+```bash
+cd /path/to/your/project
+usertests run                        # auto-detects target, uses cwd as repo
+usertests run --persona chaos-hunter  # single persona (prompt iteration)
+usertests run --steps 5               # quick sanity pass
+usertests run --watch                 # re-runs on every file change in cwd
+```
+
 ### Try it against the deliberately-broken fixture app
 
 ```bash

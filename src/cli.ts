@@ -10,7 +10,7 @@
  */
 import { Command } from "commander";
 import { config as loadEnv } from "dotenv";
-import { mkdirSync, readFileSync, readdirSync, rmSync, watch } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, watch, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,9 +31,36 @@ import {
   estimateCostUsd,
 } from "./llm.js";
 
-loadEnv(); // .env is optional; real env vars always win
+loadEnv(); // .env in YOUR project dir, if present, always wins
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+loadEnv({ path: path.join(PROJECT_ROOT, ".env") }); // the tool's own .env is the fallback (dotenv never overrides)
+const CWD = process.cwd();
+
+/** Project-local config wins over the package default — run from YOUR repo. */
+const DEFAULT_CONFIG = existsSync(path.join(CWD, "council.config.yaml"))
+  ? path.join(CWD, "council.config.yaml")
+  : path.join(PROJECT_ROOT, "council.config.yaml");
+
+/** Dev servers cluster on these ports; probe them when --target is omitted. */
+const COMMON_PORTS = [3000, 3001, 5173, 4173, 4200, 5000, 5001, 7000, 7001, 7136, 8000, 8080, 4321, 8787, 9000];
+
+/** Probe common local dev-server ports in parallel. Returns the alive ones. */
+async function probeLocalServers(): Promise<string[]> {
+  const results = await Promise.all(
+    COMMON_PORTS.map(async (p) => {
+      try {
+        const res = await fetch(`http://localhost:${p}`, {
+          signal: AbortSignal.timeout(600),
+        });
+        return res.status < 500 ? `http://localhost:${p}` : null;
+      } catch {
+        return null;
+      }
+    })
+  );
+  return results.filter((u): u is string => u !== null);
+}
 
 /** Rough per-call token assumptions for the pre-run estimate (screenshot included). */
 const EST_STEP_TOKENS = { input: 5_000, output: 300 };
@@ -110,9 +137,9 @@ program
 
 program
   .command("run")
-  .option("--target <url>", "URL of the running app to test (default: config's target)")
-  .option("--repo <path>", "path to the app's repo (context for goal-gap-auditor)", undefined)
-  .option("--config <path>", "path to council.config.yaml", path.join(PROJECT_ROOT, "council.config.yaml"))
+  .option("--target <url>", "URL of the running app to test (default: auto-detect, then config)")
+  .option("--repo <path>", "path to the app's repo — default: current directory")
+  .option("--config <path>", "path to council.config.yaml (default: ./council.config.yaml if present)", DEFAULT_CONFIG)
   .option("--steps <n>", "max steps per agent (overrides config)", (v) => Number(v))
   .option("--persona <name>", "run a single persona (for iterating on prompts)")
   .option("--watch", "re-run the council whenever a file in repo_path changes")
@@ -123,9 +150,23 @@ program
     const executeRun = async () => {
 
     // 1. Config + target validation before anything expensive happens.
+    //    With no --target and no project-local config, auto-detect the dev server.
+    let target = opts.target;
+    if (!target && !existsSync(path.join(CWD, "council.config.yaml"))) {
+      const alive = await probeLocalServers();
+      if (alive.length === 1) {
+        target = alive[0]!;
+        log(`no --target given — auto-detected your app at ${target}`);
+      } else if (alive.length > 1) {
+        throw new Error(
+          `Multiple local servers are running (${alive.join(", ")}). ` +
+            `Pass --target http://localhost:<port> so I test the right one.`
+        );
+      }
+    }
     const config = loadConfig(opts.config, {
-      target: opts.target,
-      repo: opts.repo,
+      target,
+      repo: opts.repo, // undefined → config's repo_path ("." resolves to YOUR cwd)
       steps: opts.steps,
     });
     await assertReachable(config.target);
