@@ -43,9 +43,11 @@ const DEFAULT_CONFIG = existsSync(path.join(CWD, "council.config.yaml"))
   : path.join(PROJECT_ROOT, "council.config.yaml");
 
 /** Dev servers cluster on these ports; probe them when --target is omitted. */
-const COMMON_PORTS = [3000, 3001, 5173, 4173, 4200, 5000, 5001, 7000, 7001, 7136, 8000, 8080, 4321, 8787, 9000];
+const COMMON_PORTS = [3000, 3001, 5173, 4173, 4200, 5000, 5001, 5191, 7000, 7001, 7136, 8000, 8080, 4321, 8787, 9000];
 
-/** Probe common local dev-server ports in parallel. Returns the alive ones. */
+/** Probe common local dev-server ports in parallel. Returns the alive ones.
+ *  macOS's AirPlay receiver answers 403 on 5000/7000 — treat non-2xx/3xx
+ *  (and anything speaking AirTunes) as "not a dev server". */
 async function probeLocalServers(): Promise<string[]> {
   const results = await Promise.all(
     COMMON_PORTS.map(async (p) => {
@@ -53,7 +55,9 @@ async function probeLocalServers(): Promise<string[]> {
         const res = await fetch(`http://localhost:${p}`, {
           signal: AbortSignal.timeout(600),
         });
-        return res.status < 500 ? `http://localhost:${p}` : null;
+        if (res.status >= 400) return null;
+        if (/airtunes/i.test(res.headers.get("server") ?? "")) return null;
+        return `http://localhost:${p}`;
       } catch {
         return null;
       }
