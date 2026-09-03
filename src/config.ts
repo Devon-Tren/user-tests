@@ -36,7 +36,7 @@ export interface LimitsConfig {
 }
 
 export const DEFAULT_LIMITS: LimitsConfig = {
-  max_llm_calls: 150,
+  max_llm_calls: 250, // real apps (30 steps × 4 personas + sweeps/retries) exceed 150
   max_cost_usd: null,
   max_run_minutes: 45,
   llm_timeout_seconds: 120,

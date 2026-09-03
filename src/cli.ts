@@ -24,6 +24,7 @@ import { RunLogger } from "./logger.js";
 import { notifyDone } from "./notify.js";
 import { diffSinceLastRun, hashFinding, saveHashes } from "./diff.js";
 import { estimateRunSeconds, formatEta } from "./eta.js";
+import { askRun } from "./ask.js";
 import {
   budgetStatus,
   configureLLM,
@@ -392,6 +393,35 @@ program
       });
       // The FSWatcher keeps the event loop (and this process) alive.
     }
+  });
+
+program
+  .command("ask")
+  .argument("<question>", 'question about a run, e.g. "did anyone test the settings page?"')
+  .option("--run <path>", "run folder (default: latest run in runs/)")
+  .action(async (question: string, opts: { run?: string }) => {
+    const log = (msg: string) => console.log(`[usertests] ${msg}`);
+    let runDir = opts.run;
+    if (!runDir) {
+      const runsDir = path.join(PROJECT_ROOT, "runs");
+      const candidates = existsSync(runsDir)
+        ? readdirSync(runsDir, { withFileTypes: true })
+            .filter((d) => d.isDirectory() && existsSync(path.join(runsDir, d.name, "REPORT.md")))
+            .map((d) => d.name)
+            .sort()
+            .reverse() // ISO timestamps — newest first
+        : [];
+      if (candidates.length === 0) {
+        throw new Error("No completed runs found. Run the council first: usertests run");
+      }
+      runDir = path.join(runsDir, candidates[0]!);
+    }
+    runDir = path.resolve(runDir);
+    log(`question → ${runDir}`);
+    const logger = new RunLogger(runDir);
+    const { answer, costUsd } = await askRun(question, runDir, logger);
+    console.log(`\n${answer}\n`);
+    if (costUsd !== null) log(`answer cost $${costUsd.toFixed(4)} (logged to run.log)`);
   });
 
 program.parseAsync(process.argv).catch((e) => {

@@ -37,6 +37,19 @@ usertests run --steps 5                        # quick sanity pass
 usertests run --watch                          # re-run the council on every file change in repo_path
 ```
 
+## Ask the council about a finished run
+
+```bash
+usertests ask "did anyone test the settings page?"   # latest run, any project
+usertests ask "why is C-1 critical?" --run runs/<ts> # a specific run
+```
+
+`ask` is read-only and grounded strictly in that run's artifacts (REPORT.md,
+per-persona step logs, metadata): answers cite finding codes and
+`[persona step N]`, and when no tester covered something it says so — which
+is itself a coverage answer. Each question is one small LLM call (~$0.02),
+logged to the run's `run.log`.
+
 Or, after `npm link`, use the `usertests` binary directly:
 
 ```bash

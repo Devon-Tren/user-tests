@@ -7,7 +7,7 @@ viewport: { width: 1440, height: 900 }
 # Safety rails — the run stops cleanly (chair still reports partial results)
 # when any cap is hit. All optional; these are the defaults.
 limits:
-  max_llm_calls: 150        # hard cap on LLM calls per run (retries count)
+  max_llm_calls: 250        # hard cap on LLM calls per run (retries count)
   # max_cost_usd: 2.00      # hard USD budget per run; omit for no cost cap
   max_run_minutes: 45       # wall-clock limit for the whole run
   llm_timeout_seconds: 120  # timeout for a single LLM call
