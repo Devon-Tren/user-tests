@@ -11,63 +11,64 @@ Product Owner reads before PI planning and sprint breakdown.
 The tool targets general-purpose development: usability confusion,
 goal-vs-delivery gaps, edge-case bugs, and accessibility/polish issues.
 
-## Quick start
+## One-time setup
 
 ```bash
+cd user-tests            # this repo
 npm install
 npx playwright install chromium   # one-time browser download
 npm run build
+npm link                 # puts `usertests` on your PATH
 
-export USERTESTS_API_KEY=sk-ant-…          # or put it in .env
-# optional overrides:
-# export USERTESTS_PROVIDER=anthropic      # anthropic (default) | openai
-# export USERTESTS_MODEL=claude-sonnet-4-5
-# export USERTESTS_BASE_URL=https://…      # any Anthropic- or OpenAI-compatible endpoint
-
-node dist/cli.js run --target http://localhost:3000 --repo ./path/to/project
+# API key — Anthropic or OpenAI. Edit .env (or export):
+#   USERTESTS_API_KEY=sk-…
+#   USERTESTS_PROVIDER=anthropic | openai        (default: anthropic)
+#   USERTESTS_MODEL=claude-sonnet-4-5 | gpt-4.1  (provider defaults are sane)
+#   USERTESTS_BASE_URL=https://…                 # any compatible endpoint
 ```
 
-With a sane `council.config.yaml`, zero flags work — everything falls back to
-config defaults:
+## Use it on ANY project
+
+The only requirement: **your app must be running** (the council browses a live
+URL with a real browser — it reads your repo docs but tests the UI).
 
 ```bash
-usertests run                                  # uses config target/repo
-usertests run --persona chaos-hunter           # single persona (prompt iteration)
-usertests run --steps 5                        # quick sanity pass
-usertests run --watch                          # re-run the council on every file change in repo_path
-```
-
-## Ask the council about a finished run
-
-```bash
-usertests ask "did anyone test the settings page?"   # latest run, any project
-usertests ask "why is C-1 critical?" --run runs/<ts> # a specific run
-```
-
-`ask` is read-only and grounded strictly in that run's artifacts (REPORT.md,
-per-persona step logs, metadata): answers cite finding codes and
-`[persona step N]`, and when no tester covered something it says so — which
-is itself a coverage answer. Each question is one small LLM call (~$0.02),
-logged to the run's `run.log`.
-
-Or, after `npm link`, use the `usertests` binary directly:
-
-```bash
-usertests run --target http://localhost:3000 --repo ./path/to/project
-```
-
-**Run it from inside YOUR project** — the tool treats your current directory
-as the repo under test, picks up `./council.config.yaml` if you keep one
-there, falls back to the tool's own config and `.env` (API key), and when
-`--target` is omitted it auto-detects your dev server by probing common
-ports (if several servers answer, it asks you to pick):
-
-```bash
+# 1. start your project's dev server (leave it running)
 cd /path/to/your/project
-usertests run                        # auto-detects target, uses cwd as repo
-usertests run --persona chaos-hunter  # single persona (prompt iteration)
-usertests run --steps 5               # quick sanity pass
-usertests run --watch                 # re-runs on every file change in cwd
+npm run dev
+
+# 2. from the same folder, run the council
+cd /path/to/your/project
+usertests run                          # auto-detects your dev server, uses this folder as repo context
+usertests run --target http://localhost:5191   # or say which server explicitly
+```
+
+That's it. What happens next:
+
+- If several local servers answer, it lists them and asks you to pass `--target` — it won't guess wrong.
+- Your **current folder is the repo under test**: the goal-gap-auditor reads its `README.md` / `GOALS.md` / `docs/goals.md` / `PRODUCT.md` to audit promise-vs-delivery. A `council.config.yaml` in that folder overrides the tool's config (per-project settings!).
+- A full run takes ~5–15 min and costs roughly **$0.50** (pre-run estimate is printed before any token is spent; hard caps live in `limits:`).
+
+## Read the report, then interrogate it
+
+Reports land in `user-tests/runs/<timestamp>/REPORT.md` (screenshots in `shots/`, full event log in `run.log`):
+
+```bash
+usertests ask what were the top issues                 # latest run, any project
+usertests ask did anyone test the settings page        # quoting optional
+usertests ask why is C-1 critical --run runs/<ts>      # a specific run
+```
+
+`ask` is read-only and grounded strictly in that run's artifacts: answers cite
+finding codes and `[persona step N]`; when no tester covered something it says
+so — a coverage answer, not a guess. ~$0.02 per question.
+
+## Handy flags
+
+```bash
+usertests run --steps 5              # quick sanity pass (~1 min, ~$0.10)
+usertests run --persona chaos-hunter # run one persona while iterating on prompts
+usertests run --watch                # re-run the council on every file change in cwd
 ```
 
 ### Try it against the deliberately-broken fixture app
