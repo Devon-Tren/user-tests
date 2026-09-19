@@ -13,6 +13,15 @@ limits:
   llm_timeout_seconds: 120  # timeout for a single LLM call
   keep_runs: 20             # prune older run folders after each run
 
+# Coverage briefing (mapd — static analysis). When mapd is on PATH, every persona
+# receives the app's real routes/entry points + the files with no automated tests,
+# so they aim their steps at untested flows. Fully optional: if mapd is missing or
+# fails, the run proceeds without the briefing. Adds ~1k input tokens/step (~+$0.10/run).
+# mapd:
+#   enabled: true        # default true
+#   path: mapd           # executable or absolute path
+#   max_chars: 4000      # briefing size cap
+
 council:
   testers:
     - persona: first-time-user

@@ -11,11 +11,13 @@
 import { Command, Argument } from "commander";
 import { config as loadEnv } from "dotenv";
 import { mkdirSync, readFileSync, readdirSync, rmSync, watch, existsSync } from "node:fs";
+import readline from "node:readline";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, personaPath, type CouncilConfig } from "./config.js";
 import { buildRepoContext } from "./context.js";
+import { buildCoverageBriefing } from "./coverage.js";
 import { Runner } from "./runner.js";
 import { runTester } from "./agents/tester.js";
 import { runChair } from "./agents/chair.js";
@@ -24,7 +26,8 @@ import { RunLogger } from "./logger.js";
 import { notifyDone } from "./notify.js";
 import { diffSinceLastRun, hashFinding, saveHashes } from "./diff.js";
 import { estimateRunSeconds, formatEta } from "./eta.js";
-import { askRun } from "./ask.js";
+import { RunChat, type ChatTurn } from "./chat.js";
+import { startServer } from "./serve.js";
 import {
   budgetStatus,
   configureLLM,
@@ -67,8 +70,8 @@ async function probeLocalServers(): Promise<string[]> {
   return results.filter((u): u is string => u !== null);
 }
 
-/** Rough per-call token assumptions for the pre-run estimate (screenshot included). */
-const EST_STEP_TOKENS = { input: 5_000, output: 300 };
+/** Rough per-call token assumptions for the pre-run estimate (screenshot + briefing included). */
+const EST_STEP_TOKENS = { input: 6_000, output: 300 };
 const EST_CHAIR_TOKENS = { input: 20_000, output: 4_000 };
 
 async function assertReachable(target: string): Promise<void> {
@@ -142,6 +145,7 @@ program
 
 program
   .command("run")
+  .description("run the council against a live app and write runs/<ts>/REPORT.md")
   .option("--target <url>", "URL of the running app to test (default: auto-detect, then config)")
   .option("--repo <path>", "path to the app's repo — default: current directory")
   .option("--config <path>", "path to council.config.yaml (default: ./council.config.yaml if present)", DEFAULT_CONFIG)
@@ -223,6 +227,7 @@ program
     logger.event("phase", {
       phase: "start",
       target: config.target,
+      repo_path: config.repo_path,
       testers: activeTesters.length,
       persona_hashes: personaHashes,
     });
@@ -231,6 +236,13 @@ program
 
     // 5. Repo context — goal-gap-auditor gets it; everyone else judges the UI alone.
     const repoContext = buildRepoContext(config.repo_path);
+
+    // 5b. Coverage briefing (mapd): routes/entry points + untested files for ALL
+    //     personas. Fail-open — personas run without it if mapd is unavailable.
+    const coverageBriefing = await buildCoverageBriefing(config.repo_path, config.mapd, log);
+    if (coverageBriefing) {
+      logger.event("mapd", { briefing_chars: coverageBriefing.length });
+    }
 
     // 6. Testers run sequentially (MVP constraint). Each gets a fresh browser.
     //    A crash/budget/deadline never sinks the run — failures are recorded,
@@ -261,6 +273,7 @@ program
           personaFile: personaPath(PROJECT_ROOT, tester.persona),
           harshness: tester.harshness,
           repoContext: withContext ? repoContext : null,
+          coverageBriefing,
           target: config.target,
           maxSteps: config.max_steps_per_agent,
           runDir,
@@ -395,37 +408,128 @@ program
     }
   });
 
+/** Latest completed run folder, or the --run override resolved to an absolute path. */
+function resolveRunDir(override?: string): string {
+  if (override) return path.resolve(override);
+  const runsDir = path.join(PROJECT_ROOT, "runs");
+  const candidates = existsSync(runsDir)
+    ? readdirSync(runsDir, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && existsSync(path.join(runsDir, d.name, "REPORT.md")))
+        .map((d) => d.name)
+        .sort()
+        .reverse() // ISO timestamps — newest first
+    : [];
+  if (candidates.length === 0) {
+    throw new Error("No completed runs found. Run the council first: usertests run");
+  }
+  return path.join(runsDir, candidates[0]!);
+}
+
 program
-  .command("ask")
-  .addArgument(new Argument("[question...]", 'question about a run — quoting optional: usertests ask did anyone test settings'))
+  .command("chat")
+  .description("ask a grounded analyst about a completed run (REPL)")
+  .addArgument(new Argument("[question...]", 'opening question (optional) — quoting optional: usertests chat what were the top issues'))
   .option("--run <path>", "run folder (default: latest run in runs/)")
   .action(async (questionParts: string[], opts: { run?: string }) => {
     const log = (msg: string) => console.log(`[usertests] ${msg}`);
-    const question = (questionParts ?? []).join(" ").trim();
-    if (!question) {
-      throw new Error('Usage: usertests ask <question>  — e.g. usertests ask "did anyone test the settings page?"');
-    }
-    let runDir = opts.run;
-    if (!runDir) {
-      const runsDir = path.join(PROJECT_ROOT, "runs");
-      const candidates = existsSync(runsDir)
-        ? readdirSync(runsDir, { withFileTypes: true })
-            .filter((d) => d.isDirectory() && existsSync(path.join(runsDir, d.name, "REPORT.md")))
-            .map((d) => d.name)
-            .sort()
-            .reverse() // ISO timestamps — newest first
-        : [];
-      if (candidates.length === 0) {
-        throw new Error("No completed runs found. Run the council first: usertests run");
-      }
-      runDir = path.join(runsDir, candidates[0]!);
-    }
-    runDir = path.resolve(runDir);
-    log(`question → ${runDir}`);
+    const runDir = resolveRunDir(opts.run);
     const logger = new RunLogger(runDir);
-    const { answer, costUsd } = await askRun(question, runDir, logger);
-    console.log(`\n${answer}\n`);
-    if (costUsd !== null) log(`answer cost $${costUsd.toFixed(4)} (logged to run.log)`);
+    const chat = new RunChat(runDir, logger);
+    log(`chatting about run ${chat.runName}${chat.target ? ` (target: ${chat.target})` : ""}`);
+    log('type a question, or "end" (also exit/quit) to leave. ~$0.02/turn.');
+
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      terminal: process.stdin.isTTY === true,
+    });
+    // Line-queue instead of rl.question(): question() silently drops lines
+    // that arrived while another question was pending (piped stdin, paste
+    // bursts). A queue feeds every line to exactly one consumer.
+    let closed = false;
+    const lineQueue: string[] = [];
+    let lineWaiter: ((line: string | null) => void) | null = null;
+    rl.on("line", (line) => {
+      if (lineWaiter) {
+        const w = lineWaiter;
+        lineWaiter = null;
+        w(line);
+      } else {
+        lineQueue.push(line);
+      }
+    });
+    rl.on("close", () => {
+      closed = true;
+      if (lineWaiter) {
+        const w = lineWaiter;
+        lineWaiter = null;
+        w(null); // EOF / Ctrl+D ends the session
+      }
+    });
+    const nextLine = (): Promise<string | null> => {
+      if (lineQueue.length > 0) return Promise.resolve(lineQueue.shift()!);
+      if (closed) return Promise.resolve(null);
+      return new Promise((resolve) => {
+        lineWaiter = resolve;
+      });
+    };
+    if (process.stdin.isTTY) {
+      rl.setPrompt("chat> ");
+      rl.prompt();
+    }
+
+    const history: ChatTurn[] = [];
+    let totalCost = 0;
+    let turns = 0;
+    const askOne = async (question: string): Promise<void> => {
+      try {
+        const { answer, costUsd, pulled } = await chat.ask(question, history);
+        history.push({ role: "user", content: question });
+        history.push({ role: "assistant", content: answer });
+        turns += 1;
+        if (costUsd !== null) totalCost += costUsd;
+        console.log(`\n${answer}\n`);
+        // Say which raw files the answer rests on, same as the dashboard does.
+        if (pulled.length) console.log(`  (read from ${pulled.join(", ")})\n`);
+      } catch (e) {
+        // a failed turn shouldn't kill the session — keep chatting
+        console.error(`\nError: ${e instanceof Error ? e.message : e}\n`);
+      }
+    };
+
+    const opening = (questionParts ?? []).join(" ").trim();
+    if (opening) await askOne(opening);
+
+    for (;;) {
+      const line = await nextLine();
+      if (line === null) break; // Ctrl+D / stdin closed
+      if (process.stdin.isTTY) rl.prompt(); // re-show the prompt for the next turn
+      const input = line.trim();
+      if (input.length === 0) continue;
+      if (/^(end|exit|quit|\/(end|exit|quit))$/i.test(input)) break;
+      await askOne(input);
+    }
+
+    rl.close();
+    log(`bye — ${turns} turn${turns === 1 ? "" : "s"}, $${totalCost.toFixed(4)} spent (logged to run.log)`);
+  });
+
+program
+  .command("serve")
+  .description("visual dashboard + chat for your runs (opens http://localhost:7842)")
+  .option("--run <name>", "run folder to open (default: latest run in runs/)")
+  .option("--port <n>", "port to listen on", (v) => Number(v), 7842)
+  .action((opts: { run?: string; port: number }) => {
+    const log = (msg: string) => console.log(`[usertests] ${msg}`);
+    let initialRun = opts.run ?? null;
+    if (!initialRun) {
+      try {
+        initialRun = path.basename(resolveRunDir(undefined));
+      } catch {
+        initialRun = null; // no runs yet — the dashboard's history view will say so
+      }
+    }
+    startServer({ projectRoot: PROJECT_ROOT, initialRun: initialRun ?? undefined, port: opts.port, log });
   });
 
 program.parseAsync(process.argv).catch((e) => {

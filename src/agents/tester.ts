@@ -88,19 +88,24 @@ interface LLMDecision {
 function buildSystemPrompt(
   personaMd: string,
   harshness: number,
-  repoContext: string | null
+  repoContext: string | null,
+  coverageBriefing: string | null
 ): string {
   const contextBlock =
     repoContext === null
       ? "You receive NO documentation about this app. Judge it purely by what the UI shows you."
       : `Here is the app's documented intent (from its repository):\n\n${repoContext}`;
+  const coverageBlock =
+    coverageBriefing === null
+      ? ""
+      : `\n\n---\n\nCOVERAGE MAP (from mapd, static analysis of the app's source):\n\n${coverageBriefing}\n\nUse it to aim your exploration: flows that pass through untested code are the highest-value targets — exercise them first. If you break an untested flow, file a finding. Do NOT file findings about missing unit tests or low test coverage itself — judge only the running app's user-visible behavior.`;
   return `${personaMd}
 
 ---
 
 HARSHNESS: ${harshness}/10 (3–4 = report what a reasonable user would notice; 7–8 = actively try to break it).
 
-${contextBlock}
+${contextBlock}${coverageBlock}
 
 ${FINDING_SCHEMA_REMINDER}
 
@@ -179,6 +184,8 @@ export interface TesterOptions {
   harshness: number;
   /** null ⇒ persona receives no repo context (everyone except goal-gap-auditor). */
   repoContext: string | null;
+  /** null ⇒ no mapd coverage briefing (mapd disabled/unavailable). Optional accelerator. */
+  coverageBriefing?: string | null;
   target: string;
   maxSteps: number;
   runDir: string;
@@ -192,7 +199,7 @@ export interface TesterOptions {
 export async function runTester(opts: TesterOptions): Promise<TesterResult> {
   const { runner } = opts;
   const personaMd = readFileSync(opts.personaFile, "utf8");
-  const system = buildSystemPrompt(personaMd, opts.harshness, opts.repoContext);
+  const system = buildSystemPrompt(personaMd, opts.harshness, opts.repoContext, opts.coverageBriefing ?? null);
 
   const steps: StepRecord[] = [];
   const findings: Finding[] = [];
@@ -265,7 +272,7 @@ export async function runTester(opts: TesterOptions): Promise<TesterResult> {
     mkdirSync(findingsDir, { recursive: true });
     writeFileSync(
       path.join(findingsDir, `${opts.personaName}.json`),
-      JSON.stringify({ persona: opts.personaName, steps, findings }, null, 2)
+      JSON.stringify({ persona: opts.personaName, steps, findings, stoppedReason: stoppedReason ?? null }, null, 2)
     );
     runner.saveLog(path.join(findingsDir, `${opts.personaName}.actions.json`));
   };
@@ -318,9 +325,17 @@ export async function runTester(opts: TesterOptions): Promise<TesterResult> {
       // (max 2 rounds; the filed list is shown so nothing is double-counted).
       for (let round = 0; round < 2; round++) {
         const filedList = findings.map((f) => f.title).join("; ") || "(none yet)";
+        const roleCheck = opts.personaName === "goal-gap-auditor"
+          ? "\nRe-read every documented promise in your system context. If the history does not explicitly prove a promised feature worked, treat an absent or unreachable feature as a goal gap and file it now."
+          : opts.personaName === "a11y-polish"
+            ? "\nReview the focused-element markers from your keyboard pass. If focus repeated or could not leave a component, file the demonstrated keyboard/focus trap now."
+            : opts.personaName === "chaos-hunter"
+              ? "\nReview what appeared immediately after each empty form submission. If the page became blank, empty, or lost its UI, describe that visible crash explicitly and file it now."
+              : "";
         const sweepPrompt =
           `${userPrompt}\n\nCLOSING SWEEP: you are about to finish. Issues you have ALREADY FILED: ${filedList}.` +
           `\nIf you OBSERVED any other issue that you did NOT file yet (a gap you confirmed, a button that did nothing, a crash, a barrier), reply with ONE JSON object: {"action":"done","finding":{...the finding schema...}}.` +
+          roleCheck +
           `\nIf everything observed is already filed, reply with {"action":"done"}.`;
         const sweepRaw = await ask(step, sweepPrompt, screenshot);
         const sweepDecision = validateDecision(extractJson(sweepRaw));
@@ -350,9 +365,16 @@ export async function runTester(opts: TesterOptions): Promise<TesterResult> {
     }
 
     steps.push(record);
+    const focused = result.snapshot.match(/^-.+\[focused\].*$/m)?.[0];
+    const pageState = /ELEMENTS \(0\):\s*\n\(none\)/.test(result.snapshot)
+      ? " [page now has zero visible interactive elements]"
+      : focused
+        ? ` [focus now: ${focused.slice(2, 180)}]`
+        : "";
     history.push(
       `Step ${step}: ${decision.action} ${JSON.stringify(decision.params ?? {})} → ` +
         (result.ok ? "ok" : `FAILED: ${result.error}`) +
+        pageState +
         (decision.reasoning ? ` ("${decision.reasoning.slice(0, 120)}")` : "")
     );
     opts.onProgress?.(`step ${step}/${opts.maxSteps}`);

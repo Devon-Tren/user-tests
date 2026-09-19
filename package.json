@@ -4,6 +4,14 @@
   "description": "A council of LLM-driven agent personas that user-test a locally running web app and produce a single REPORT.md.",
   "license": "MIT",
   "type": "module",
+  "files": [
+    "dist",
+    "dashboard",
+    "personas",
+    "council.config.yaml",
+    "README.md",
+    "LICENSE"
+  ],
   "bin": {
     "usertests": "dist/cli.js"
   },
@@ -11,9 +19,15 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "clean": "node scripts/clean.js",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "test": "npm run build && npm run test:unit && npm run test:dashboard",
+    "test:unit": "tsx --test tests/acceptance.test.ts tests/artifacts.test.ts tests/config.test.ts tests/llm.test.ts tests/report.test.ts tests/server.test.ts",
+    "test:dashboard": "tsx --test tests/dashboard.test.ts tests/runner.test.ts",
+    "check": "npm test",
     "smoke": "tsx scripts/smoke.ts",
     "acceptance": "npm run build && tsx scripts/acceptance.ts",
+    "prepack": "npm run build",
     "start": "node dist/cli.js",
     "fixture:serve": "node scripts/serve-fixture.js"
   },
@@ -22,6 +36,7 @@
     "commander": "^12.1.0",
     "dotenv": "^16.4.5",
     "playwright": "^1.49.0",
+    "three": "^0.186.0",
     "yaml": "^2.6.0"
   },
   "devDependencies": {

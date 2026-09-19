@@ -1,181 +1,299 @@
 # User-Tests
 
-A CLI tool that spins up a **council of LLM-driven agent personas** that act as a
-user-testing group for a locally running web app. Each agent drives the app
-through a real browser (Playwright), behaves according to its persona, and logs
-findings. A **chair** agent then dedupes findings, verifies reproducibility by
-mechanically replaying recorded steps in a fresh browser session, ranks
-severity, and writes a single structured `REPORT.md` — the deliverable a
-Product Owner reads before PI planning and sprint breakdown.
+A CLI tool that spins up a **council of LLM-driven agent personas** to user-test
+a locally running web app. Each agent drives the app through a real browser
+(Playwright), behaves according to its persona, and logs findings. A **chair**
+agent then dedupes them, verifies reproducibility by mechanically replaying the
+recorded steps in a fresh browser, ranks severity, and writes one structured
+`REPORT.md` — the deliverable a Product Owner reads before sprint planning.
 
-The tool targets general-purpose development: usability confusion,
-goal-vs-delivery gaps, edge-case bugs, and accessibility/polish issues.
+It looks for usability confusion, goal-vs-delivery gaps, edge-case bugs, and
+accessibility/polish issues. A full run typically takes ~5–15 minutes and costs
+about **$0.50–$1.25**, depending on the model, retries, and app complexity.
 
-## One-time setup
+[Install](#install) · [First run](#your-first-run) · [What you get](#what-you-get) · [Dashboard](#the-dashboard) · [Reference](#reference) · [Troubleshooting](#troubleshooting) · [How it works](#how-it-works) · [Development](#development)
+
+## Install
+
+You need **Node ≥ 20**, an **app running on localhost**, and an **API key** for
+Anthropic or OpenAI. Chromium is installed below. `mapd` is
+optional — it unlocks coverage-guided personas and the Architecture tab.
 
 ```bash
-cd user-tests            # this repo
-npm install
-npx playwright install chromium   # one-time browser download
-npm run build
-npm link                 # puts `usertests` on your PATH
+git clone <this-repo> user-tests && cd user-tests
 
-# API key — Anthropic or OpenAI. Edit .env (or export):
-#   USERTESTS_API_KEY=sk-…
-#   USERTESTS_PROVIDER=anthropic | openai        (default: anthropic)
-#   USERTESTS_MODEL=claude-sonnet-4-5 | gpt-4.1  (provider defaults are sane)
-#   USERTESTS_BASE_URL=https://…                 # any compatible endpoint
+npm install                       # runtime + TypeScript development tooling
+npx playwright install chromium   # one-time browser download (~130 MB)
+npm run build                     # strict TypeScript compile → dist/
+npm link                          # puts `usertests` on your PATH
+
+cat > .env <<'EOF'
+USERTESTS_API_KEY=sk-…
+USERTESTS_PROVIDER=anthropic        # or: openai
+# USERTESTS_MODEL=claude-sonnet-4-5 # provider defaults are sane
+# USERTESTS_BASE_URL=https://…      # any Anthropic- or OpenAI-compatible endpoint
+EOF
 ```
 
-## Use it on ANY project
-
-The only requirement: **your app must be running** (the council browses a live
-URL with a real browser — it reads your repo docs but tests the UI).
+Check it works without spending a token:
 
 ```bash
-# 1. start your project's dev server (leave it running)
+usertests --version
+npm run fixture:serve &                    # test app on :4173
+npm run smoke -- http://localhost:4173     # opens it, screenshots, prints the DOM snapshot
+```
+
+<details>
+<summary>Prefer not to <code>npm link</code>?</summary>
+
+Every command below works unlinked — substitute one of:
+
+```bash
+node dist/cli.js run …      # after npm run build
+npx tsx src/cli.ts run …    # straight from source, no build step
+npm start -- run …          # via the package script
+```
+</details>
+
+## Your first run
+
+The repo ships a deliberately-broken fixture app: a dead button, a
+white-screening form, an unlabeled input, a documented-but-missing Export
+feature, and a keyboard focus trap. The council is expected to surface at least
+four of the five.
+
+```bash
+npm run fixture:serve                                                    # terminal 1 → :4173
+usertests run --target http://localhost:4173 --repo tests/fixture-app    # terminal 2
+usertests serve                                                          # terminal 3 → :7842
+```
+
+### On your own project
+
+The only requirement is that **your app is running** — the council browses a
+live URL with a real browser. It reads your repo for context, but it tests the
+UI.
+
+```bash
 cd /path/to/your/project
-npm run dev
+npm run dev                                    # leave it running
 
-# 2. from the same folder, run the council
-cd /path/to/your/project
-usertests run                          # auto-detects your dev server, uses this folder as repo context
-usertests run --target http://localhost:5191   # or say which server explicitly
+usertests run                                  # auto-detects the dev server, uses this folder as repo context
+usertests run --target http://localhost:5191   # or name the server explicitly
+usertests run --steps 5                        # quick sanity pass first (~1 min, ~$0.10)
 ```
 
-That's it. What happens next:
+Three things worth knowing:
 
-- If several local servers answer, it lists them and asks you to pass `--target` — it won't guess wrong.
-- Your **current folder is the repo under test**: the goal-gap-auditor reads its `README.md` / `GOALS.md` / `docs/goals.md` / `PRODUCT.md` to audit promise-vs-delivery. A `council.config.yaml` in that folder overrides the tool's config (per-project settings!).
-- A full run takes ~5–15 min and costs roughly **$0.50** (pre-run estimate is printed before any token is spent; hard caps live in `limits:`).
+- **Auto-detect** probes common dev-server ports in parallel. If several answer,
+  the CLI lists them and asks for `--target` — it never guesses wrong.
+- **Your current folder is the repo under test.** `goal-gap-auditor` reads its
+  `README.md` / `GOALS.md` / `docs/goals.md` / `PRODUCT.md` to audit
+  promise-vs-delivery, and a `council.config.yaml` there overrides the tool's
+  own config — so settings can live per project.
+- **Cost is bounded.** The estimate prints before any token is spent, and hard
+  caps live under `limits:` in the config.
 
-## Read the report, then interrogate it
+If [mapd](https://github.com/) is on your PATH, every persona also gets a
+**coverage briefing** first: the app's real routes/entry points and the source
+files with no automated tests (static analysis — deterministic, no API key,
+~1s). Personas use it to aim their limited steps at untested flows instead of
+wandering. Fully optional and fail-open. Adds ~1k input tokens per step
+(~+$0.10/run); tune or disable via `mapd:` in the config.
 
-Reports land in `user-tests/runs/<timestamp>/REPORT.md` (screenshots in `shots/`, full event log in `run.log`):
+## What you get
+
+Everything lands in `runs/<ISO-timestamp>/`. Nothing hides in a database — the
+run folder *is* the output, and the dashboard's Artifacts tab browses it.
+
+| File | What it is |
+|---|---|
+| `REPORT.md` | the chair's report: verified findings, severities, repro steps — the deliverable |
+| `findings-merged.json` | the same findings as data: deduped, ranked, expected vs actual |
+| `findings/<persona>.json` | that persona's full step log — reasoning, results, findings it filed |
+| `findings/<persona>.actions.json` | the raw browser actions it took, in order, with selectors and errors |
+| `shots/*.png` | screenshots, including one per finding as evidence |
+| `run.log` | append-only JSONL: every phase, LLM call, token count, duration, cost, error |
+| `arch.json` | cached mapd code map (written when you first open Architecture or Visual) |
+| `project.json`, `explains.json` | cached project brief and per-finding explanations |
+| `findings-hashes.json` | fingerprints, so the next run can say what's NEW |
+
+Read it however you like:
 
 ```bash
-usertests ask what were the top issues                 # latest run, any project
-usertests ask did anyone test the settings page        # quoting optional
-usertests ask why is C-1 critical --run runs/<ts>      # a specific run
+cat runs/<ts>/REPORT.md   # or open it in your editor
+usertests chat            # ask a grounded analyst about it
+usertests serve           # or read it all visually
 ```
 
-`ask` is read-only and grounded strictly in that run's artifacts: answers cite
+`chat` is read-only and grounded strictly in that run's artifacts. Answers cite
 finding codes and `[persona step N]`; when no tester covered something it says
-so — a coverage answer, not a guess. ~$0.02 per question.
-
-## Handy flags
-
-```bash
-usertests run --steps 5              # quick sanity pass (~1 min, ~$0.10)
-usertests run --persona chaos-hunter # run one persona while iterating on prompts
-usertests run --watch                # re-run the council on every file change in cwd
-```
-
-### Try it against the deliberately-broken fixture app
+so — a coverage answer, not a guess. The digest loads once per session and the
+conversation rides along, so follow-ups work naturally. A failed turn doesn't
+end the session. ~$0.02 per turn, total printed when you leave.
 
 ```bash
-npm run fixture:serve          # serves tests/fixture-app on http://localhost:4173
-node dist/cli.js run --target http://localhost:4173 --repo tests/fixture-app
+usertests chat                             # REPL over the latest run
+usertests chat what were the top issues    # opening question — quoting optional
+chat> did anyone test the settings page    # follow-ups keep full context
+chat> why is C-1 critical
+chat> end                                  # leave (also: exit, quit, Ctrl+D)
 ```
 
-The fixture plants 5 issues (dead button, white-screening form, unlabeled
-input, a documented-but-missing Export feature, and a keyboard focus trap).
-The council's `REPORT.md` must surface at least 4 of the 5.
+## The dashboard
 
-## How it works
+```bash
+usertests serve          # → http://localhost:7842 (127.0.0.1 only)
+```
 
-1. **Validate first, spend later** — the CLI checks the target URL is reachable
-   and all persona files exist before a single LLM token is spent.
-2. **Council of testers (sequential)** — each persona gets a fresh Playwright
-   session and runs an observe → think → act loop (capped by
-   `max_steps_per_agent`). Agents may only act through a closed action set
-   (`goto, click, type, pressKey, scroll, hover, goBack, screenshot`), so every
-   behavior is auditable and replayable.
-3. **What agents "see"** — a compact accessibility-tree-style DOM snapshot
-   (interactive elements with roles, labels, selectors; token-budget-capped)
-   plus a screenshot.
-4. **Personas are Markdown, not code** — behavior is tuned by editing files in
-   `personas/`, never by touching agent logic. `first-time-user` deliberately
-   receives **no** repo context; `goal-gap-auditor` receives the full repo
-   briefing (`README.md`, `GOALS.md`, `docs/goals.md`, `PRODUCT.md`).
-5. **Chair** — one LLM call dedupes (same root cause = one finding, all finders
-   credited) and ranks by severity. Findings at or above
-   `min_severity_to_verify` are then **mechanically replayed** from the source
-   persona's recorded action log in a fresh browser — no LLM judgment involved.
-   Confirmed → main report; failed → appendix as *unverified*. Minor findings
-   are never replayed; they land in the appendix as *unverified* with the reason.
-6. **Output is files** — `runs/<ISO-timestamp>/` contains per-persona findings
-   JSON + action logs, `shots/` screenshots, `run.log` (structured JSONL of
-   every LLM call with token usage, duration, and cost), and the final
-   `REPORT.md`.
+A zero-dependency local dashboard over all your runs. Switch runs from the
+picker in the header; `⌘/Ctrl+K` opens the chat drawer anywhere, `Esc` closes it.
 
-## Reliability rails
+| Tab | What it shows |
+|---|---|
+| **Project** | what this app *is* — brief, tech stack, main flows, top risks |
+| **Overview** | severity, cost and duration, response/retry integrity, persona completion, artifact health, and the rendered report |
+| **Journey** | the page-flow graph of where personas actually went, then each run retold as a story: chapters per screen, every action in plain words, a 🚩 at the exact step a problem was filed |
+| **Mind Map** | the app itself — screens visited → what was done there → problems pinned where they were found, plus the code surfaces underneath |
+| **Architecture** | the technical view of the source, via mapd |
+| **Findings** | every finding as a card: repro steps, expected vs actual, screenshot, one-click **LLM explanation** (cached per run) |
+| **Artifacts** | the run folder itself, browsable |
+| **History** | cross-run trends with NEW-findings badges and successful-response/API-attempt reliability |
+| **Visual** | an interactive 3D repository blueprint: orbit, pan, zoom, hover and pin the complete technical map |
 
-- **Pre-run estimate** — expected LLM calls and cost are printed before the
-  run starts, with a warning if the estimate exceeds your cost cap.
-- **Hard caps** — `limits.max_llm_calls` / `limits.max_cost_usd` stop spending
-  mid-run; the affected persona keeps the findings it already gathered.
-- **Partial runs** — if a persona crashes, the budget is hit, or the
-  wall-clock deadline passes, the chair still runs on whatever findings exist
-  and `REPORT.md` is marked `Status: PARTIAL` with the reason per persona.
-- **Retries & timeouts** — transient LLM errors (network, 429, 5xx) retry up
-  to 3 times with exponential backoff (honoring `Retry-After`); every call has
-  a `limits.llm_timeout_seconds` timeout.
-- **Error taxonomy** — failures name their category and a fix: config errors
-  say which key is wrong, target errors say to start the app, LLM errors say
-  auth vs. rate-limit vs. timeout, browser errors say to run
-  `npx playwright install chromium`.
+**Architecture** renders a layered dependency graph: entry points on the left,
+one column per import hop, workflow colouring, untested files dashed, red
+back-edges for cycle candidates. Toggle layers⇄folders, zoom, filter, or click a
+module to pin it — everything upstream lights amber, downstream green, and the
+inspector opens its functions, exports and internal call graph. Underneath:
+graph metrics, a risk-scored hotspot table, a blast-radius × size risk map, a
+directory coupling heatmap and LOC treemap, cycle (SCC) detection, the workflow
+catalogue, external-dependency ranking and the function-size distribution. Older
+runs can enter their repo path manually; new runs record it automatically.
 
-## Daily-driver conveniences
+**Visual** turns that same static-analysis graph into a true WebGL code atlas
+(with the original canvas renderer retained as a compatibility fallback).
+It uses a deterministic architectural site plan: the repository sits on a
+surveyed base at the center, each concentric guide ring is a shortest-hop
+dependency layer, source folders own angular sectors, and translucent module
+blocks (massing-model style, with bright survey linework) are sized by lines of
+code. Entry points raise a survey pin, foundation rings encode test status, and
+risk beacons remain independent from the active colour mode. Exact imports
+become solid animated routes whose particles travel from importer to dependency;
+inferred shared workflows are dashed rails, directory affinity stays on the
+ground plane, and only actually imported packages enter the outer belt.
+Search or jump to a module, filter to runtime code, test
+gaps or high-risk files, recolour by workflow/risk/tests/folder, switch
+route layers, or jump between top, isometric and front cameras.
+Import routes thicken with the number of modules that depend on their target,
+broad arcs bridge districts into cross-directory trade routes scaled by import
+volume, and hovering (not just selecting) a module isolates its neighborhood.
+The WebGL world runs through a bloom + vignette/grain post chain for a
+cinematic, living-system look. Hover previews an element; clicking
+pins it and lights its upstream blast radius amber and downstream dependencies
+green. Drag freely through a full 360° orbit, Shift-drag to pan, use the wheel
+to zoom, or use the keyboard controls shown in the view. Module roles get
+distinct geometry, packages orbit the repository boundary, labels declutter in
+screen space, clicking flies the camera to a module, and **TOUR** walks through
+entry points, high-risk files and blast-radius hotspots automatically.
 
-- **NEW-since-last-run banner** — each run stores a hash of its findings
-  (`findings-hashes.json`); the next run prints
-  `N of M findings are NEW since last run`.
-- **Progress + ETA** — live step counter per persona; ETA estimated from the
-  seconds-per-step of prior runs' `run.log` files.
-- **Watch mode** — `--watch` re-runs the council (debounced, serialized) on
-  file changes in `repo_path` during active development.
-- **Completion notification** — terminal bell + macOS notification when a run
-  finishes, so you can walk away.
-- **Persona versioning** — every run's `run.log` records the SHA-1 of each
-  persona file, so results are attributable to prompt versions.
-- **Disk hygiene** — only the newest `limits.keep_runs` run folders are kept.
+**Artifacts** makes the run folder readable in place: `REPORT.md` rendered, JSON
+pretty-printed and syntax-coloured with a shape summary, `run.log` as a
+filterable event stream, screenshots inline — with open-raw, download and
+copy-id on each. Artifact references inside the report (`shots/C-1.png`) are
+clickable everywhere they appear, and every other tab shows which files it was
+rendered from.
 
-## Report quality knobs
+### The analyst pulls artifacts on demand
 
-- **Corroboration** — each finding notes whether it was seen by a single
-  persona (⚠) or corroborated by several (✓).
-- **False-positive pruning** — after mechanical replay, one batched chair LLM
-  call drops confirmed findings whose claim contradicts the end-of-replay page
-  snapshot (demoted to the appendix, never deleted). Disable with
-  `chair.false_positive_pruning: false`.
-- **Full-page screenshots** — set `full_page_screenshots: true` to capture
-  entire pages instead of viewport-only shots.
-- **Replay hardening** — replays wait for selectors and tolerate navigation,
-  no fixed sleeps.
+The chat analyst gets a catalogue of every file the run wrote. When a question
+needs more than the digest carries — the exact selector in an action trace, a
+specific `run.log` event — it requests the file and answers from its contents on
+the next round-trip, telling you which ones it opened. You can force the matter:
+**📎 pin** any artifact in the UI (or `/pin findings/chaos-hunter.actions.json`)
+and the next answer quotes that file verbatim. A pull costs one extra LLM
+round-trip, capped at two rounds and ~90 KB per turn.
 
-## Regression gate
+Slash commands in the dashboard chat are free — no tokens:
 
-`npm run acceptance` is the harness: run it before pushing any change to
-`src/` or `personas/` — it proves the council still surfaces ≥4 of the 5
-planted fixture issues. A pre-push hook (`.git/hooks/pre-push`) runs it
-automatically when council code, personas, config, or the fixture change;
-bypass a failing gate deliberately with
-`USERTESTS_SKIP_ACCEPTANCE=1 git push`.
+| Command | Does |
+|---|---|
+| `/help` | list these |
+| `/severity`, `/cost` | findings donut · LLM spend per persona |
+| `/flow C-2` | repro path for a finding |
+| `/timeline chaos-hunter` | that persona's step/finding timeline |
+| `/artifacts` | list every file this run wrote |
+| `/artifact REPORT.md` | open one in the viewer |
+| `/pin findings/chaos-hunter.actions.json` | ground the next answer in that file |
+| `/project` | full project brief from the analyst (this one does spend) |
 
-## Configuration (`council.config.yaml`)
+## Reference
+
+### CLI
+
+**`usertests run`** — run the council against a live app.
+
+| Flag | Meaning |
+|---|---|
+| `--target <url>` | URL of the running app (default: auto-detect, then config) |
+| `--repo <path>` | the app's repo — default: current directory |
+| `--config <path>` | `council.config.yaml` to use (default: `./council.config.yaml` if present) |
+| `--steps <n>` | max steps per agent, overriding config |
+| `--persona <name>` | run a single persona — for iterating on prompts |
+| `--watch` | re-run whenever a file in `repo_path` changes (debounced, serialized) |
+
+**`usertests chat [question…]`** — `--run <path>` picks a run folder (default:
+the latest in `runs/`).
+
+**`usertests serve`** — `--run <name>` opens a specific run, `--port <n>`
+changes the port (default `7842`). Bound to `127.0.0.1` only. Deep links:
+`?run=<folder>&tab=<tab>&repo=<abs-path>`.
+
+### npm scripts
+
+```bash
+npm run build          # strict TypeScript compile
+npm test               # deterministic unit, API, security, UI, and Playwright checks
+npm run smoke -- <url> # open a page, screenshot, print the DOM snapshot (no LLM)
+npm run acceptance     # live model-quality run; requires ≥4/5 real planted findings
+npm run fixture:serve  # serve tests/fixture-app on :4173
+```
+
+### Environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `USERTESTS_API_KEY` | — | **required** |
+| `USERTESTS_PROVIDER` | `anthropic` | `anthropic` \| `openai` |
+| `USERTESTS_MODEL` | provider default | e.g. `claude-sonnet-4-5`, `gpt-4.1` |
+| `USERTESTS_BASE_URL` | — | any compatible endpoint (gateways, proxies) |
+| `USERTESTS_SKIP_ACCEPTANCE` | — | set to `1` to bypass the pre-push gate deliberately |
+
+Only `src/llm.ts` knows about providers, so switching backends is env-only:
+
+```bash
+USERTESTS_PROVIDER=openai USERTESTS_MODEL=gpt-4o USERTESTS_API_KEY=sk-… usertests run …
+USERTESTS_PROVIDER=openai USERTESTS_BASE_URL=https://my-gateway/v1 …   # any OpenAI-compatible endpoint
+```
+
+### `council.config.yaml`
 
 ```yaml
 target: http://localhost:3000   # overridable by --target
 repo_path: .                    # overridable by --repo
 max_steps_per_agent: 30         # overridable by --steps
 viewport: { width: 1440, height: 900 }
+# full_page_screenshots: true   # default false = viewport-only shots
 limits:                         # safety rails (all optional, defaults shown)
-  max_llm_calls: 150            # hard cap on LLM calls per run
+  max_llm_calls: 250            # hard cap on API attempts per run
   # max_cost_usd: 2.00          # hard USD budget; omit for no cost cap
   max_run_minutes: 45           # wall-clock limit
   llm_timeout_seconds: 120      # per-LLM-call timeout
   keep_runs: 20                 # prune older runs/ folders after each run
+# mapd:                         # coverage briefing; on by default when mapd is on PATH
+#   enabled: true
+#   path: mapd
+#   max_chars: 4000
 council:
   testers:
     - persona: first-time-user   # harshness 4
@@ -186,42 +304,122 @@ council:
     verify_repro: true
     min_severity_to_verify: major
     max_findings_per_run: 25
+    # false_positive_pruning: true
 ```
 
 Add a tester by dropping a new `.md` into `personas/` and adding an entry under
 `council.testers` — no code changes required.
 
-## Swapping LLM providers
+### HTTP API
 
-Only `src/llm.ts` knows about providers. Set env vars to switch backends with
-zero code changes:
+The dashboard is a thin client over a small JSON API, useful for scripting:
 
-```bash
-USERTESTS_PROVIDER=openai USERTESTS_MODEL=gpt-4o USERTESTS_API_KEY=sk-… usertests run …
-# or any OpenAI-compatible endpoint:
-USERTESTS_PROVIDER=openai USERTESTS_BASE_URL=https://my-gateway/v1 …
+```
+GET  /api/runs                      all runs + headline stats
+GET  /api/run?dir=<name>            one run: findings, persona steps, cost stats
+GET  /api/architecture?dir=<name>   the mapd code map (&repo=, &fresh=1)
+GET  /api/artifacts?dir=<name>      every file the run wrote, typed and labelled
+GET  /api/artifact?dir=&file=       one artifact as text + metadata
+GET  /artifact-raw?dir=&file=       one artifact as bytes (&download=1)
+POST /api/explain                   {dir, code} → grounded explanation
+POST /api/chat                      {dir, message, history[], artifacts[]}
 ```
 
-## Verifying the chair's repro gate
+## Troubleshooting
 
-To prove the chair rejects fabricated findings, seed one: edit a persona's
-`findings/<persona>.json` in a completed run folder to add a finding whose
-`atStep` points past the end of the action log (or references actions that
-can't replay), then re-run the chair stage. It lands in
-`## Appendix: Unverified Findings` with the reason.
+| Symptom | Fix |
+|---|---|
+| `USERTESTS_API_KEY is not set` | add it to `.env` in the repo root, or export it |
+| LLM auth error | wrong key for the chosen `USERTESTS_PROVIDER` — they are not interchangeable |
+| `Multiple local servers are running` | pass `--target http://localhost:<port>` |
+| Target unreachable | start your dev server first; the CLI validates before spending anything |
+| Browser errors on launch | `npx playwright install chromium` |
+| Architecture tab says *no code graph* | install mapd, or paste the repo's absolute path into the box (older runs didn't record it) |
+| `usertests: command not found` | `npm link`, or call `node dist/cli.js` / `npx tsx src/cli.ts` |
+| Run stopped early | a cap in `limits:` was hit — the chair still reports what was gathered and marks the run `PARTIAL` |
+| Port 7842 in use | `usertests serve --port 7900` |
+
+## How it works
+
+1. **Validate first, spend later** — the CLI checks the target URL is reachable
+   and all persona files exist before a single LLM token is spent.
+2. **Council of testers (sequential)** — each persona gets a fresh Playwright
+   session and runs an observe → think → act loop, capped by
+   `max_steps_per_agent`. Agents may only act through a closed action set
+   (`goto, click, type, pressKey, scroll, hover, goBack, screenshot`), so every
+   behavior is auditable and replayable.
+3. **What agents "see"** — a compact accessibility-tree-style DOM snapshot
+   (interactive elements with roles, labels, selectors; token-budget-capped)
+   plus a screenshot.
+4. **Personas are Markdown, not code** — behavior is tuned by editing files in
+   `personas/`, never by touching agent logic. `first-time-user` deliberately
+   receives **no** repo context; `goal-gap-auditor` receives the full briefing.
+5. **Chair** — one LLM call dedupes (same root cause = one finding, all finders
+   credited) and ranks by severity. Findings at or above
+   `min_severity_to_verify` are then **mechanically replayed** from the source
+   persona's recorded action log in a fresh browser — no LLM judgment involved.
+   Confirmed → main report; failed → appendix as *unverified*. Minor findings
+   are never replayed; they land in the appendix with the reason.
+6. **Output is files** — everything in `runs/<ISO-timestamp>/`, as above.
+
+### What it handles for you
+
+**Spending and failure.** A pre-run estimate prints expected LLM calls and cost,
+warning if it exceeds your cap. `limits.max_llm_calls` / `limits.max_cost_usd`
+stop spending mid-run, and the affected persona keeps what it already gathered.
+If a persona crashes, the budget is hit, or the wall-clock deadline passes, the
+chair still runs and `REPORT.md` is marked `Status: PARTIAL` with a per-persona
+reason. Transient LLM errors (network, 429, 5xx) retry up to 3 times with
+exponential backoff honoring `Retry-After`, under a per-call timeout. Failures
+name their category and a fix — config errors say which key is wrong, target
+errors say to start the app, browser errors say to run `playwright install`.
+
+**Day to day.** Each run hashes its findings, so the next one prints `N of M
+findings are NEW since last run`. A live step counter shows progress with an ETA
+derived from prior runs' `run.log` files. `--watch` re-runs on file changes. A
+terminal bell and macOS notification fire on completion, so you can walk away.
+Every `run.log` records the SHA-1 of each persona file, making results
+attributable to prompt versions. Only the newest `limits.keep_runs` folders are
+kept.
+
+**Report quality.** Each finding notes whether one persona saw it (⚠) or several
+corroborated it (✓). After replay, one batched chair call drops confirmed
+findings whose claim contradicts the end-of-replay page snapshot — demoted to
+the appendix, never deleted (`chair.false_positive_pruning: false` to disable).
+Replays wait for selectors and tolerate navigation, with no fixed sleeps. Set
+`full_page_screenshots: true` for entire pages instead of viewport-only shots.
 
 ## Development
 
-```bash
-npm run smoke -- http://localhost:4173   # open page, screenshot, print DOM snapshot (no LLM)
-npm run acceptance                        # full council run vs. fixture; asserts ≥4/5 planted issues surface
-npm run build                            # strict TypeScript compile
-```
+Work straight from source with `npx tsx src/cli.ts …` — no build step needed
+while iterating. Dependencies are exactly `playwright`, `commander`, `yaml`,
+`dotenv`, and one provider SDK (`@anthropic-ai/sdk`). Nothing else. The
+dashboard is a single static `dashboard/index.html` with no build pipeline and
+no CDN calls.
 
-Dependencies are exactly: `playwright`, `commander`, `yaml`, `dotenv`, and one
-provider SDK (`@anthropic-ai/sdk`). Nothing else.
+**Regression gates.** `npm test` is deterministic and free: it compiles strict
+TypeScript, tests configuration/report/artifact safety, exercises the dashboard
+API, and renders every dashboard surface in Chromium at desktop and mobile
+widths. Run it before every push.
 
-## Roadmap (explicit non-goals for this MVP)
+`npm run acceptance` is the live model-quality gate. It runs the full council
+against the fixture and requires at least four of five planted issues to appear
+as structured main/goal-gap findings. Appendix items and replay-rejected false
+positives do not count. This spends real tokens, so it is intentionally separate
+from the default suite.
 
-Parallel agents, quick/full run modes, run-to-run diffing, auth/login flows,
-mobile viewports, web dashboard, database, API server, npm publishing, Docker.
+<details>
+<summary>Verifying the chair's repro gate yourself</summary>
+
+To prove the chair rejects fabricated findings, seed one: edit a persona's
+`findings/<persona>.json` in a completed run folder to add a finding whose
+`atStep` points past the end of the action log (or references actions that can't
+replay), then re-run the chair stage. It lands in
+`## Appendix: Unverified Findings` with the reason.
+</details>
+
+**Deliberate product boundaries:** testers run sequentially; authenticated flows
+and multiple device profiles require project-specific setup; results remain
+local files rather than a hosted database. The package is prepared for local
+linking or an npm tarball, but publishing it to a registry is a release-owner
+decision.

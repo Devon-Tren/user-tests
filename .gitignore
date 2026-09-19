@@ -2,3 +2,7 @@ node_modules/
 dist/
 runs/
 .env
+.DS_Store
+.mapd/
+*.tgz
+coverage/

@@ -43,6 +43,17 @@ export const DEFAULT_LIMITS: LimitsConfig = {
   keep_runs: 20,
 };
 
+export interface MapdConfig {
+  /** Build a coverage briefing (routes/entry points + untested files) via the mapd CLI. */
+  enabled: boolean;
+  /** mapd executable or absolute path (default: "mapd" on PATH). */
+  path: string;
+  /** Char budget for the briefing injected into every persona prompt. */
+  max_chars: number;
+}
+
+export const DEFAULT_MAPD: MapdConfig = { enabled: true, path: "mapd", max_chars: 4_000 };
+
 export interface CouncilConfig {
   target: string;
   repo_path: string;
@@ -51,6 +62,7 @@ export interface CouncilConfig {
   /** true = full-page screenshots everywhere; false (default) = viewport only. */
   full_page_screenshots: boolean;
   limits: LimitsConfig;
+  mapd: MapdConfig;
   council: {
     testers: TesterConfig[];
     chair: ChairConfig;
@@ -185,6 +197,28 @@ export function loadConfig(
     limits.keep_runs = v;
   }
 
+  const mapdRaw = (c["mapd"] ?? {}) as Record<string, unknown>;
+  const mapd: MapdConfig = { ...DEFAULT_MAPD };
+  if (mapdRaw["enabled"] !== undefined) {
+    if (typeof mapdRaw["enabled"] !== "boolean") {
+      fail('"mapd.enabled" must be true or false (or omitted — default true).');
+    }
+    mapd.enabled = mapdRaw["enabled"];
+  }
+  if (mapdRaw["path"] !== undefined) {
+    if (typeof mapdRaw["path"] !== "string" || mapdRaw["path"].trim() === "") {
+      fail('"mapd.path" must be a non-empty string (mapd executable or absolute path).');
+    }
+    mapd.path = mapdRaw["path"];
+  }
+  if (mapdRaw["max_chars"] !== undefined) {
+    const v = mapdRaw["max_chars"];
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 500) {
+      fail('"mapd.max_chars" must be an integer >= 500.');
+    }
+    mapd.max_chars = v;
+  }
+
   return {
     target,
     repo_path: path.resolve(repoPath),
@@ -192,6 +226,7 @@ export function loadConfig(
     viewport: { width: viewport.width as number, height: viewport.height as number },
     full_page_screenshots: fullPageShots,
     limits,
+    mapd,
     council: {
       testers,
       chair: {

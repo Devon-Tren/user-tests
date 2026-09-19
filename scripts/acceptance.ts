@@ -13,24 +13,17 @@ import { config as loadEnv } from "dotenv";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  evaluateFixtureAcceptance,
+  FIXTURE_ACCEPTANCE_MINIMUM,
+  type AcceptanceFinding,
+} from "../src/acceptance.js";
 
 loadEnv(); // .env is optional; real env vars always win
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURE_PORT = 4173;
 const FIXTURE_URL = `http://localhost:${FIXTURE_PORT}`;
-const MIN_FOUND = 4;
-
-/** One detector per planted issue in tests/fixture-app/index.html. Tolerant
- *  regexes on the whole REPORT.md (main sections + appendix both count as
- *  "surfaced"). Tune here if the council's phrasing drifts. */
-const PLANTED_ISSUES: { name: string; detector: RegExp }[] = [
-  { name: 'Dead "Save Draft" button', detector: /save.?draft/i },
-  { name: "Empty-submit white screen", detector: /white.?screen|blank page|crash/i },
-  { name: "Unlabeled email input", detector: /unlabel|no label|missing label|aria-label|placeholder/i },
-  { name: "Missing Export feature (goal gap)", detector: /export/i },
-  { name: "Keyboard focus trap", detector: /focus trap|keyboard trap|tab/i },
-];
 
 function fail(msg: string): never {
   console.error(`\n[acceptance] FAIL: ${msg}`);
@@ -116,18 +109,26 @@ try {
   const runDir = path.join(PROJECT_ROOT, "runs", newDirs[0]!);
   const reportPath = path.join(runDir, "REPORT.md");
   if (!existsSync(reportPath)) fail(`REPORT.md missing in ${runDir}`);
-  const report = readFileSync(reportPath, "utf8");
+  const mergedPath = path.join(runDir, "findings-merged.json");
+  if (!existsSync(mergedPath)) fail(`findings-merged.json missing in ${runDir}`);
+  let findings: AcceptanceFinding[];
+  try {
+    const merged = JSON.parse(readFileSync(mergedPath, "utf8")) as { findings?: AcceptanceFinding[] };
+    if (!Array.isArray(merged.findings)) fail(`findings array missing in ${mergedPath}`);
+    findings = merged.findings;
+  } catch (e) {
+    fail(`could not parse ${mergedPath}: ${e instanceof Error ? e.message : e}`);
+  }
 
   // 4. Verdict.
   console.log(`\n[acceptance] report: ${path.relative(PROJECT_ROOT, reportPath)}\n`);
-  let found = 0;
-  for (const issue of PLANTED_ISSUES) {
-    const hit = issue.detector.test(report);
-    if (hit) found += 1;
-    console.log(`  ${hit ? "FOUND  " : "MISSED "} ${issue.name}`);
+  const results = evaluateFixtureAcceptance(findings);
+  const found = results.filter((result) => result.found).length;
+  for (const result of results) {
+    console.log(`  ${result.found ? "FOUND  " : "MISSED "} ${result.name}${result.code ? ` (${result.code})` : ""}`);
   }
-  console.log(`\n[acceptance] ${found}/${PLANTED_ISSUES.length} planted issues surfaced (need ≥${MIN_FOUND})`);
-  if (found < MIN_FOUND) fail("below acceptance threshold");
+  console.log(`\n[acceptance] ${found}/${results.length} planted issues surfaced as real findings (need ≥${FIXTURE_ACCEPTANCE_MINIMUM})`);
+  if (found < FIXTURE_ACCEPTANCE_MINIMUM) fail("below acceptance threshold");
   console.log("[acceptance] PASS");
 } finally {
   fixtureServer?.kill();

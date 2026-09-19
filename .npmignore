@@ -1,0 +1,10 @@
+.env
+.git/
+.mapd/
+runs/
+src/
+tests/
+scripts/
+node_modules/
+*.tgz
+.DS_Store

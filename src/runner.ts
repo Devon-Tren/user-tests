@@ -113,8 +113,12 @@ const SNAPSHOT_SCRIPT = `(max) => {
     const label = labelFor(el);
     if (label) bits.push(JSON.stringify(label));
     bits.push(selectorFor(el));
+    if (el === document.activeElement) bits.push('[focused]');
     if (el.getAttribute('tabindex') === '-1') bits.push('[tabindex=-1]');
     if (el.disabled) bits.push('[disabled]');
+    const expanded = el.getAttribute('aria-expanded');
+    if (expanded !== null) bits.push('[expanded=' + expanded + ']');
+    if (el.checked === true) bits.push('[checked]');
     return '- ' + bits.join(' ');
   });
   const truncated = all.length > max ? '\\n… (' + (all.length - max) + ' more elements truncated)' : '';

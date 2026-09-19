@@ -49,7 +49,6 @@ function renderFinding(
     `- **Expected:** ${finding.expected} | **Actual:** ${finding.actual}`,
   ];
   if (shot) lines.push(`- **Screenshot:** ${shot}`);
-  lines.push(`- **Suggested fix:** `);
   return lines.join("\n");
 }
 
@@ -138,5 +137,28 @@ export function writeReport(
 
   const out = path.join(runDir, "REPORT.md");
   writeFileSync(out, parts.join("\n"));
+
+  // Machine-readable twin of the report (dashboard/serve consumes this; REPORT.md
+  // stays the human deliverable). Codes match the report's C-n / M-n / m-n labels.
+  const merged = [
+    ...critical.map((f, i) => ({ code: `C-${i + 1}`, section: "main" as const, ...f })),
+    ...major.map((f, i) => ({ code: `M-${i + 1}`, section: "main" as const, ...f })),
+    ...minor.map((f, i) => ({ code: `m-${i + 1}`, section: "main" as const, ...f })),
+    ...goalGaps.map((f, i) => ({ code: `G-${i + 1}`, section: "goal-gap" as const, ...f })),
+    ...appendix.map((f, i) => ({ code: `A-${i + 1}`, section: "appendix" as const, ...f })),
+  ];
+  writeFileSync(
+    path.join(runDir, "findings-merged.json"),
+    JSON.stringify(
+      {
+        timestamp: meta.timestamp,
+        target: meta.target,
+        partial: meta.partial ?? [],
+        findings: merged,
+      },
+      null,
+      2
+    )
+  );
   return out;
 }
