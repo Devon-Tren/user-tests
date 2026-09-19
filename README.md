@@ -94,7 +94,7 @@ Three things worth knowing:
 - **Cost is bounded.** The estimate prints before any token is spent, and hard
   caps live under `limits:` in the config.
 
-If [mapd](https://github.com/) is on your PATH, every persona also gets a
+If `mapd` is on your PATH, every persona also gets a
 **coverage briefing** first: the app's real routes/entry points and the source
 files with no automated tests (static analysis — deterministic, no API key,
 ~1s). Personas use it to aim their limited steps at untested flows instead of
