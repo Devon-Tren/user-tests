@@ -20,7 +20,7 @@ Anthropic or OpenAI. Chromium is installed below. `mapd` is
 optional — it unlocks coverage-guided personas and the Architecture tab.
 
 ```bash
-git clone <this-repo> user-tests && cd user-tests
+git clone https://github.com/Devon-Tren/user-tests.git && cd user-tests
 
 npm install                       # runtime + TypeScript development tooling
 npx playwright install chromium   # one-time browser download (~130 MB)

@@ -44,5 +44,13 @@
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   },
-  "author": "Devon Trenoskie"
+  "author": "Devon Trenoskie",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Devon-Tren/user-tests.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Devon-Tren/user-tests/issues"
+  },
+  "homepage": "https://github.com/Devon-Tren/user-tests#readme"
 }
