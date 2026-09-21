@@ -23,16 +23,47 @@ Two facts constrain every design decision:
 
 ## 2. Where the code is right now
 
-**Branch `feat/onboarding-front-end`, 3 commits, NOT pushed.**
+> **Publishing? Read `LAUNCH.md` instead** — it is the ordered runbook to a
+> public release. This file is the state of the system.
+
+**Branch `feat/onboarding-front-end`, 9 commits ahead of `main`, pushed.**
 
 ```
+7653cf1 fix: serve worked in a dev checkout and nowhere else
+e04e980 feat(dashboard): one Explore tab, and views named for what they show
+237db32 refactor(css): one radius scale, and colour that goes through the tokens
+ab22c9a feat: start the dev server from the dashboard, and stop lying about cost
+0be2bd0 fix(acceptance): score the white-screen bug the way models word it
+da5ec40 docs: rewrite the handoff as a state document
 4e17c42 docs: narrated walkthrough, played once inside the onboarding
 c229e71 feat: onboarding front end — setup, launch and live progress
 d1c52c5 refactor: share the probe and the estimate, redact secrets from run.log
 ```
 
-Working tree clean. `npm test` green: **22 unit + 6 dashboard, 0 failures.**
+Working tree clean. `npm test` green: **35 unit + 6 dashboard, 0 failures.**
 Node 22, TypeScript strict, no build step for the dashboard.
+
+### Added after the first draft of this file
+
+- `src/devserver.ts` — detects the project's own start command (manager from
+  the lockfile, script by preference, whether `node_modules` exists) and can
+  run it: `DevServerSupervisor`, detached process group, reaped on exit.
+  **This removes the "your app must already be running" cliff.**
+- `src/estimate.ts` gained `learnedCostPerStep()` / `learnedStepUtilisation()`.
+  The estimator was overstating by **3.4x** — quoting $1.80–$2.82 when 16
+  completed runs average **$0.52** — because it priced every persona burning
+  its full step budget. It now learns from history the way `eta.ts` does, and
+  `phase:start` records `max_steps_per_agent` so utilisation becomes learnable.
+- **Ten tabs became seven.** Journey / Mind Map / Architecture / Visual are one
+  **Explore** tab with a switcher, each named for what it shows. Old
+  `?tab=architecture` links redirect; `goTab("architecture")` still works;
+  `curView()` answers "what is on screen".
+- **CSS tokens.** Raw `rgba()` 236 → 67 via channel tokens; 26 radii → 6.
+  Verified with a computed-style diff over 244 elements: **zero colour or
+  shadow changes**.
+- **`serve` was broken from every npm install** — it path-guessed
+  `../node_modules/three/...`, which npm hoisting makes nonexistent. Found only
+  by installing the real tarball into an empty directory.
 
 ### Modules added this session
 
@@ -182,12 +213,17 @@ Be honest about this with whoever picks it up.
 
 - **Nobody has ever pressed Start on a real run.** Spawn, live feed, cancel and
   redaction are all covered deterministically against a fake `dist/cli.js`, but
-  no real money has gone through the button. **This is the single biggest gap.**
+  no real money has gone through the button. **This is the single biggest gap**
+  and it is now ~$0.15 (one tester, quick pass). Step 0 of `LAUNCH.md`.
 - **The post-run handoff has never run live** — "Open the report" -> `selectRun`
   -> takeover reset only ever ran against synthetic events.
-- **No clean-checkout install test.** Packing the real tarball and installing
-  into an empty dir is the check that caught mapd's `files` omissions. Not done
-  here.
+- ~~No clean-checkout install test~~ — **done 2026-09-21, and it found a
+  launch-blocking bug** (see the `three` resolution fix above). Worth repeating
+  before any publish.
+- **Journey overflows 2.3x at 390px** (897px SVG). Pre-existing; the responsive
+  assertion only ever ran against History.
+- **Acceptance passes with zero margin.** 4/5 against a threshold of 4, and the
+  unlabeled-input miss was genuine, not a matcher artifact.
 - **Dead CSS is unmeasured.** A naive audit said 63% of selectors never match,
   but it skipped the welcome modal and findings states, so that number is junk.
   Needs a real instrumented pass before anyone deletes anything.
