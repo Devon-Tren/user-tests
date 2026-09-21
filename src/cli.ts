@@ -25,15 +25,12 @@ import { writeReport } from "./report.js";
 import { RunLogger } from "./logger.js";
 import { notifyDone } from "./notify.js";
 import { diffSinceLastRun, hashFinding, saveHashes } from "./diff.js";
-import { estimateRunSeconds, formatEta } from "./eta.js";
+import { formatEta } from "./eta.js";
+import { assertReachable, probeLocalServers } from "./probe.js";
+import { estimateRun, formatEstimate } from "./estimate.js";
 import { RunChat, type ChatTurn } from "./chat.js";
 import { startServer } from "./serve.js";
-import {
-  budgetStatus,
-  configureLLM,
-  currentModel,
-  estimateCostUsd,
-} from "./llm.js";
+import { budgetStatus, configureLLM } from "./llm.js";
 
 loadEnv(); // .env in YOUR project dir, if present, always wins
 
@@ -45,74 +42,6 @@ const CWD = process.cwd();
 const DEFAULT_CONFIG = existsSync(path.join(CWD, "council.config.yaml"))
   ? path.join(CWD, "council.config.yaml")
   : path.join(PROJECT_ROOT, "council.config.yaml");
-
-/** Dev servers cluster on these ports; probe them when --target is omitted. */
-const COMMON_PORTS = [3000, 3001, 5173, 4173, 4200, 5000, 5001, 5191, 7000, 7001, 7136, 8000, 8080, 4321, 8787, 9000];
-
-/** Probe common local dev-server ports in parallel. Returns the alive ones.
- *  macOS's AirPlay receiver answers 403 on 5000/7000 — treat non-2xx/3xx
- *  (and anything speaking AirTunes) as "not a dev server". */
-async function probeLocalServers(): Promise<string[]> {
-  const results = await Promise.all(
-    COMMON_PORTS.map(async (p) => {
-      try {
-        const res = await fetch(`http://localhost:${p}`, {
-          signal: AbortSignal.timeout(600),
-        });
-        if (res.status >= 400) return null;
-        if (/airtunes/i.test(res.headers.get("server") ?? "")) return null;
-        return `http://localhost:${p}`;
-      } catch {
-        return null;
-      }
-    })
-  );
-  return results.filter((u): u is string => u !== null);
-}
-
-/** Rough per-call token assumptions for the pre-run estimate (screenshot + briefing included). */
-const EST_STEP_TOKENS = { input: 6_000, output: 300 };
-const EST_CHAIR_TOKENS = { input: 20_000, output: 4_000 };
-
-async function assertReachable(target: string): Promise<void> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8_000);
-  try {
-    const res = await fetch(target, { method: "GET", signal: controller.signal });
-    if (res.status >= 500) {
-      throw new Error(`target responded with HTTP ${res.status}`);
-    }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(
-      `Target ${target} is not reachable (${msg}). Start your app first — no LLM tokens were spent.`
-    );
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/** Pre-run token/cost estimate — printed before any LLM call happens. */
-function printEstimate(config: CouncilConfig, testerCount: number, log: (msg: string) => void): void {
-  const { model } = currentModel();
-  const testerCalls = testerCount * config.max_steps_per_agent;
-  const estCalls = testerCalls + 1; // + chair
-  const stepCost = estimateCostUsd(model, EST_STEP_TOKENS.input, EST_STEP_TOKENS.output) ?? 0;
-  const chairCost = estimateCostUsd(model, EST_CHAIR_TOKENS.input, EST_CHAIR_TOKENS.output) ?? 0;
-  const estCost = testerCalls * stepCost + chairCost;
-  log(
-    `estimate: ~${estCalls} LLM calls, ~$${estCost.toFixed(2)} on ${model} ` +
-      `(caps: ${config.limits.max_llm_calls} calls` +
-      (config.limits.max_cost_usd !== null ? `, $${config.limits.max_cost_usd.toFixed(2)}` : ", no cost cap") +
-      `, ${config.limits.max_run_minutes}min wall-clock)`
-  );
-  if (config.limits.max_cost_usd !== null && estCost > config.limits.max_cost_usd) {
-    log(
-      `WARNING: estimate (~$${estCost.toFixed(2)}) exceeds limits.max_cost_usd ` +
-        `($${config.limits.max_cost_usd.toFixed(2)}) — the run will stop early when the cap is hit.`
-    );
-  }
-}
 
 /** Short hash of a persona file — results stay attributable to prompt versions. */
 function fileHash(file: string): string {
@@ -205,9 +134,10 @@ program
       maxCostUsd: config.limits.max_cost_usd,
       timeoutSeconds: config.limits.llm_timeout_seconds,
     });
-    printEstimate(config, activeTesters.length, log);
     const runsDir = path.join(PROJECT_ROOT, "runs");
-    const etaSeconds = estimateRunSeconds(runsDir, activeTesters.length, config.max_steps_per_agent);
+    const estimate = estimateRun(config, activeTesters.length, runsDir);
+    for (const line of formatEstimate(estimate)) log(line);
+    const etaSeconds = estimate.etaSeconds;
     const runStart = Date.now();
     log(etaSeconds !== null ? `ETA: ${formatEta(etaSeconds)} (from prior runs)` : "ETA: no history yet — this run will teach it");
     const deadlineAt = Date.now() + config.limits.max_run_minutes * 60_000;
@@ -519,7 +449,8 @@ program
   .description("visual dashboard + chat for your runs (opens http://localhost:7842)")
   .option("--run <name>", "run folder to open (default: latest run in runs/)")
   .option("--port <n>", "port to listen on", (v) => Number(v), 7842)
-  .action((opts: { run?: string; port: number }) => {
+  .option("--browse-root <path>", "folder the dashboard's repo browser may not escape (default: your home directory)")
+  .action((opts: { run?: string; port: number; browseRoot?: string }) => {
     const log = (msg: string) => console.log(`[usertests] ${msg}`);
     let initialRun = opts.run ?? null;
     if (!initialRun) {
@@ -529,7 +460,13 @@ program
         initialRun = null; // no runs yet — the dashboard's history view will say so
       }
     }
-    startServer({ projectRoot: PROJECT_ROOT, initialRun: initialRun ?? undefined, port: opts.port, log });
+    startServer({
+      projectRoot: PROJECT_ROOT,
+      initialRun: initialRun ?? undefined,
+      port: opts.port,
+      log,
+      browseRoot: opts.browseRoot ? path.resolve(opts.browseRoot) : undefined,
+    });
   });
 
 program.parseAsync(process.argv).catch((e) => {
