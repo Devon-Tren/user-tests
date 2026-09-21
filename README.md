@@ -35,6 +35,11 @@ USERTESTS_PROVIDER=anthropic        # or: openai
 EOF
 ```
 
+> **Or skip the `.env` entirely.** Run `usertests serve` and the **Start** tab
+> walks you through it: it tells you what is missing, takes your key in a form
+> and writes that file for you, finds your running app, and launches the run.
+> See [The dashboard](#the-dashboard).
+
 Check it works without spending a token:
 
 ```bash
@@ -151,6 +156,7 @@ picker in the header; `⌘/Ctrl+K` opens the chat drawer anywhere, `Esc` closes 
 
 | Tab | What it shows |
 |---|---|
+| **Start** | set up your API key, pick a repo and a running app, see the cost, launch a run and watch it live |
 | **Project** | what this app *is* — brief, tech stack, main flows, top risks |
 | **Overview** | severity, cost and duration, response/retry integrity, persona completion, artifact health, and the rendered report |
 | **Journey** | the page-flow graph of where personas actually went, then each run retold as a story: chapters per screen, every action in plain words, a 🚩 at the exact step a problem was filed |
@@ -160,6 +166,42 @@ picker in the header; `⌘/Ctrl+K` opens the chat drawer anywhere, `Esc` closes 
 | **Artifacts** | the run folder itself, browsable |
 | **History** | cross-run trends with NEW-findings badges and successful-response/API-attempt reliability |
 | **Visual** | an interactive 3D repository blueprint: orbit, pan, zoom, hover and pin the complete technical map |
+
+**Start** is the front door. On a machine that is not set up yet — no API key,
+no Chromium, no runs — it takes the whole page over instead of dropping you on
+an empty dashboard; once the tool works and a run exists, it demotes to an
+ordinary tab. It checks readiness (all free — no LLM call happens on page
+load), writes your key to `.env` at mode `0600`, browses your filesystem
+server-side to pick the repo, probes the usual dev-server ports so you can click
+your app rather than type its URL, shows **cost and ETA before anything is
+spent**, and then streams the run live: phase, persona, findings, spend so far,
+with Cancel. When it finishes it hands you straight to the report.
+
+**Picking a project** goes through your OS's own folder dialog. A *browser*
+cannot hand a server a folder path — `webkitdirectory` uploads file contents
+and `showDirectoryPicker()` returns a sandboxed handle — but `usertests serve`
+runs on your machine, so the server opens Finder (or the Windows/zenity
+equivalent) and reads the path off it. The browser never touches a file.
+
+Where no dialog exists — a headless box, an SSH session — the in-page browser
+takes over: directory names only, never file contents, and it cannot escape
+your home directory. `--browse-root <path>` moves that boundary if your repos
+live elsewhere. A folder you chose in the OS dialog is allowed to sit outside
+it, because picking it *is* the consent.
+
+**Choosing depth** is a choice between outcomes, not a number of steps: a
+**Quick pass** or a **Full run**, each quoting its own live price, plus a
+per-persona option so a single tester can be run for a fraction of the cost.
+
+**First run** plays a short narrated walkthrough, once. It ships in `docs/`
+rather than inside the npm package, so installs stay small; when it is absent
+the onboarding simply shows its written cards instead.
+
+Because the dashboard can now spend money, the routes that do so are gated: a
+per-process token substituted into the page, a same-origin check, and a
+JSON-content-type requirement that forces a preflight on any cross-origin
+attempt. Your API key is never returned by any endpoint, never placed on a
+command line, and is stripped from `run.log` by `redactSecrets`.
 
 **Architecture** renders a layered dependency graph: entry points on the left,
 one column per import hop, workflow colouring, untested files dashed, red
@@ -246,8 +288,9 @@ Slash commands in the dashboard chat are free — no tokens:
 the latest in `runs/`).
 
 **`usertests serve`** — `--run <name>` opens a specific run, `--port <n>`
-changes the port (default `7842`). Bound to `127.0.0.1` only. Deep links:
-`?run=<folder>&tab=<tab>&repo=<abs-path>`.
+changes the port (default `7842`), `--browse-root <path>` sets the folder the
+Start tab's repo browser may not escape (default: your home directory). Bound to
+`127.0.0.1` only. Deep links: `?run=<folder>&tab=<tab>&repo=<abs-path>`.
 
 ### npm scripts
 
@@ -323,6 +366,24 @@ GET  /api/artifact?dir=&file=       one artifact as text + metadata
 GET  /artifact-raw?dir=&file=       one artifact as bytes (&download=1)
 POST /api/explain                   {dir, code} → grounded explanation
 POST /api/chat                      {dir, message, history[], artifacts[]}
+```
+
+Onboarding routes. Everything here is free except `POST /api/run/start`; the
+ones marked **token** require the `x-usertests-token` header that the dashboard
+is served with, plus a same-origin `Origin`:
+
+```
+GET  /api/setup                     readiness: key, Chromium, Node, mapd
+POST /api/setup                     {apiKey, provider} → writes .env    token
+GET  /api/fs/list?path=             directories only, contained         token
+POST /api/fs/pick                   open the OS folder dialog           token
+GET  /api/probe                     live dev-server scan, with titles
+GET  /api/estimate?repo=&target=    cost, ETA, call count — no spend
+GET  /api/run/status                the run in flight, if any
+POST /api/run/start                 {target, repoPath, confirmCostUsd}  token
+POST /api/run/cancel                SIGTERM the run's process group     token
+GET  /api/run/events                SSE: stdout + run.log, live
+GET  /demo.mp4                      the walkthrough, if one is installed
 ```
 
 ## Troubleshooting

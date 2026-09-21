@@ -213,6 +213,112 @@ assertions go. Run it before every push (and remember the hook).
 
 ---
 
+---
+
+## Part 3 — The front end, as built (2026-09-20)
+
+Part 2's MVP is implemented, plus the setup half it deliberately scoped out.
+It is one new dashboard surface, **Start**, with three states chosen from real
+readiness rather than wizard steps:
+
+- **Setup** — when a blocking check fails. Each failing check carries its own
+  fix: a form for the key, a copy-able command for Chromium.
+- **Launch** — folder browser, port picker, steps, cost + ETA, one confirm.
+- **Running** — live feed, derived phase/personas/findings/spend/elapsed, Cancel.
+
+It **takes the page over** (tab bar hidden) when the tool is not ready, there
+are no runs, or a run is in flight; otherwise it is the 10th tab.
+
+### New modules
+
+| File | Why |
+|---|---|
+| `src/probe.ts` | `COMMON_PORTS`, `probeLocalServers()`, `probeLocalServersDetailed()`, `assertReachable()` — moved out of `cli.ts` so the server shares them |
+| `src/estimate.ts` | `estimateRun()` / `formatEstimate()` — the CLI's printed estimate and the UI's confirm now quote one number |
+| `src/setup.ts` | readiness checks, and the only code that writes credentials |
+| `src/browse.ts` | server-side folder listing with realpath containment (the fallback) |
+| `src/pick.ts` | the OS folder dialog — osascript / PowerShell / zenity |
+| `src/launch.ts` | `RunSupervisor` — spawn, tail, cancel |
+
+### Three decisions worth not re-litigating
+
+**The run is a child process, not an in-process call.** `executeRun` is a
+closure over CLI options and `configureLLM`'s budget is module-global — running
+it inside the server would share a budget counter with the viewer and let a
+Playwright crash take the dashboard down. `spawn(node, ["dist/cli.js", "run", …])`
+gives isolation, a real kill switch, and byte-identical `run.log`, with **no
+refactor of the run path**. `cwd` is the repo under test, so a project-local
+`council.config.yaml` wins exactly as it would from a terminal. The key rides in
+`env`, never argv — argv is world-readable via `ps`.
+
+**Progress needs two sources.** The run folder does not exist until config,
+reachability and the estimate have all passed, so tailing `run.log` alone leaves
+the feed blank for the first several seconds of real work. The supervisor
+relays the child's stdout too, then switches to the JSONL log once the folder
+appears. Events carry gapless `seq` numbers so a mid-run refresh replays only
+what it missed (`GET /api/run/events?since=`).
+
+**The security shift Part 2 warned about is handled.** Mutating routes need all
+three of: a per-process token substituted into the page at the `/` route, an
+`Origin` matching the request's own `Host`, and `content-type: application/json`
+(which forces a preflight the origin check then fails). `GET /api/fs/list` is
+gated too — it discloses filesystem layout even though it reads nothing.
+`redactSecrets()` in `logger.ts` scrubs every event before append, by field name
+*and* by value shape. **No CSP change was needed** — `EventSource` is already
+covered by `connect-src 'self'`.
+
+### The folder-path constraint had a third answer
+
+Part 2 listed three options and picked the server-side browser, because "a
+browser cannot hand a server a folder path". That is true of the *browser* —
+but `usertests serve` runs on the same machine as the person using it, so the
+**server** can open the OS dialog and read the path off it. `src/pick.ts` does
+that via `osascript` / PowerShell / `zenity`; the browser never sees a file.
+
+The in-page browser stays as the fallback (headless, SSH, no zenity), and the
+server tells the UI which to offer via `nativePicker` on `/api/fs/list`.
+
+Containment needed a second rule: a natively-picked folder is outside
+`browseRoot` by definition. The dialog is the consent, so the server records
+picked paths and `/api/run/start` accepts those — and only those — from
+outside the root.
+
+### Presets, because $1.80 is the wrong first number
+
+The default config is 30 steps x 4 personas, so the first price a newcomer saw
+was ~$1.80 behind a field called "steps per persona". It is now Quick pass vs
+Full run, each card quoting itself, plus a persona picker (~$0.21 for one
+tester on a quick pass).
+
+Steps derive from the preset through a single `applyPreset()`. They did not at
+first, and the selected card said $0.48 while the button charged $2.82 — the
+worst possible bug on a control that spends money. The regression test for it
+initially passed while completely broken, because `assert.equal` under
+`node:assert/strict` is `Object.is` and `Object.is(NaN, NaN)` is true; the
+estimate had been 400ing all along for want of a `council.config.yaml` in the
+fixture. Both are fixed, and the test now asserts the prices are finite first.
+
+### Still true, still the cliff
+
+Your app has to be running. The UI cannot remove that, so it names it: an empty
+port probe renders an explicit "start your app first, then re-probe" banner
+rather than an empty list. `assertReachable()` runs before the spawn, so a
+wrong URL costs nothing.
+
+### Tests
+
+`npm test` is 19 tests (was 11), all deterministic and free. New coverage:
+`tests/setup.test.ts` (surgical `.env` rewriting, `0600`, newline injection,
+redaction), `tests/launch.test.ts` (spawn → stdout → run.log tail → run-dir
+discovery → cancel, against a fake `dist/cli.js`), guard assertions in
+`tests/server.test.ts`, and takeover/launch assertions in `tests/dashboard.test.ts`.
+
+**Not yet done:** a real end-to-end council run started from the UI. Every
+mechanism is covered deterministically, but nobody has yet pressed Start and
+spent real money through it.
+
+---
+
 ## Open items
 
 - [ ] `npm publish` mapd — prepped, verified, not run. Claims the name and burns
@@ -220,4 +326,8 @@ assertions go. Run it before every push (and remember the hook).
 - [ ] Flip User-Tests public: `gh repo edit Devon-Tren/user-tests --visibility public`
 - [ ] Once mapd is on npm, README can link to it properly (the dead
       `https://github.com/` link was stripped, not replaced)
-- [ ] Front end, per Part 2
+- [x] Front end, per Part 2 — see Part 3
+- [ ] Press Start once against the fixture app and confirm the live feed on a
+      real run (~$0.15 at `--steps 1`)
+- [ ] Trap 2 is still open: `?repo=` still writes a hybrid `project.json`. The
+      Start screen sidesteps it (no LLM call on load) but does not fix it.
