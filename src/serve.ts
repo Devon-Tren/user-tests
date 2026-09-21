@@ -40,6 +40,7 @@ import { applyCredentials, readiness } from "./setup.js";
 import { defaultBrowseRoot, listDirs } from "./browse.js";
 import { RunSupervisor } from "./launch.js";
 import { nativePickerAvailable, pickFolder, PickCancelled } from "./pick.js";
+import { detectDevCommand, DevServerSupervisor } from "./devserver.js";
 
 export interface ServeOptions {
   projectRoot: string;
@@ -821,6 +822,14 @@ export function createDashboardServer(opts: ServeOptions): Server {
   const demoVideo = path.join(projectRoot, "docs", "user-tests-walkthrough.mp4");
   const hasDemo = (): boolean => existsSync(demoVideo);
 
+  // At most one dashboard-started dev server. We spawned it, so we own its
+  // lifetime: it dies with this process rather than lingering as an orphan.
+  const devServer = new DevServerSupervisor(log);
+  const reapDev = () => { if (devServer.running) devServer.stop(); };
+  process.once("exit", reapDev);
+  process.once("SIGINT", () => { reapDev(); process.exit(0); });
+  process.once("SIGTERM", () => { reapDev(); process.exit(0); });
+
   const pickedPaths = new Set<string>();
   const repoAllowed = (p: string): boolean => {
     if (pickedPaths.has(path.resolve(p))) return true;
@@ -1095,6 +1104,34 @@ export function createDashboardServer(opts: ServeOptions): Server {
           if (e instanceof PickCancelled) return json(res, 200, { cancelled: true });
           return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
         }
+      }
+
+      if (route === "/api/dev-command" && req.method === "GET") {
+        // Gated: it reads the user's package.json and reports their scripts.
+        guard(req, { token, json: false });
+        const repo = url.searchParams.get("repo");
+        if (!repo || !repoAllowed(repo)) return json(res, 400, { error: "unknown repo" });
+        return json(res, 200, { dev: detectDevCommand(repo) });
+      }
+
+      if (route === "/api/dev/status" && req.method === "GET") {
+        return json(res, 200, { dev: devServer.current() });
+      }
+
+      if (route === "/api/dev/start" && req.method === "POST") {
+        guard(req, { token });
+        const body = await readJsonBody<{ repoPath?: string; script?: string }>(req);
+        if (!body.repoPath || !repoAllowed(body.repoPath)) return json(res, 400, { error: "unknown repo" });
+        try {
+          return json(res, 200, { dev: devServer.start(body.repoPath, body.script) });
+        } catch (e) {
+          return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+
+      if (route === "/api/dev/stop" && req.method === "POST") {
+        guard(req, { token });
+        return json(res, 200, { dev: devServer.stop() });
       }
 
       if (route === "/api/probe" && req.method === "GET") {

@@ -22,7 +22,7 @@
     "clean": "node scripts/clean.js",
     "build": "npm run clean && tsc -p tsconfig.json",
     "test": "npm run build && npm run test:unit && npm run test:dashboard",
-    "test:unit": "tsx --test tests/acceptance.test.ts tests/artifacts.test.ts tests/config.test.ts tests/llm.test.ts tests/report.test.ts tests/server.test.ts tests/setup.test.ts tests/launch.test.ts tests/pick.test.ts",
+    "test:unit": "tsx --test tests/acceptance.test.ts tests/artifacts.test.ts tests/config.test.ts tests/llm.test.ts tests/report.test.ts tests/server.test.ts tests/setup.test.ts tests/launch.test.ts tests/pick.test.ts tests/devserver.test.ts tests/estimate.test.ts tests/devsupervisor.test.ts",
     "test:dashboard": "tsx --test tests/dashboard.test.ts tests/runner.test.ts",
     "check": "npm test",
     "smoke": "tsx scripts/smoke.ts",

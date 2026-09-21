@@ -4713,24 +4713,31 @@ async function renderStart() {
 
 // -- Setup ------------------------------------------------------------------
 
+/** A command with a copy button. The empty-probe state and the setup checks
+ *  both need one, and a command you cannot copy is barely better than prose. */
+function cmdRow(command, note) {
+  const box = el("div", "fixcmd", `<code>${esc(command)}</code>`);
+  const copy = el("button", "btn ghost", "Copy");
+  copy.type = "button";
+  copy.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(command); copy.textContent = "Copied"; }
+    catch { copy.textContent = "Select it"; }
+    setTimeout(() => { copy.textContent = "Copy"; }, 1600);
+  });
+  box.appendChild(copy);
+  if (!note) return box;
+  const wrap = el("div", "");
+  wrap.append(box, el("div", "hint", note));
+  return wrap;
+}
+
 function checkRow(c) {
   const row = el("div", "check " + (c.ok ? "ok" : c.blocking ? "bad" : "warn"));
   row.appendChild(el("div", "mark", c.ok ? "✓" : c.blocking ? "!" : "·"));
   const body = el("div", "body");
   body.appendChild(el("div", "", `<b>${esc(c.label)}</b>`));
   body.appendChild(el("div", "detail", esc(c.detail)));
-  if (!c.ok && c.fixCommand) {
-    const fix = el("div", "fixcmd", `<code>${esc(c.fixCommand)}</code>`);
-    const copy = el("button", "btn ghost", "Copy");
-    copy.type = "button";
-    copy.addEventListener("click", async () => {
-      try { await navigator.clipboard.writeText(c.fixCommand); copy.textContent = "Copied"; }
-      catch { copy.textContent = "Select it"; }
-      setTimeout(() => { copy.textContent = "Copy"; }, 1600);
-    });
-    fix.appendChild(copy);
-    body.appendChild(fix);
-  }
+  if (!c.ok && c.fixCommand) body.appendChild(cmdRow(c.fixCommand));
   row.appendChild(body);
   return row;
 }
@@ -4855,6 +4862,7 @@ function launchView(wrap) {
         showPicked();
         paintChoices();
         refreshEstimate();
+        if (!(S.launch.servers || []).length) probe();
       }
     } catch (e) {
       // Headless box, no zenity, locked-down machine — the browser still works.
@@ -4890,7 +4898,15 @@ function launchView(wrap) {
     }
     const use = el("button", "btn" + (d.isRepo ? "" : " ghost"), "Use this folder");
     use.type = "button";
-    use.addEventListener("click", () => { S.launch.dir = d.path; S.launch.estimate = null; showPicked(); refreshEstimate(); });
+    use.addEventListener("click", () => {
+      S.launch.dir = d.path;
+      S.launch.estimate = null;
+      showPicked();
+      paintChoices();
+      refreshEstimate();
+      // Re-probe so the "start your app" command matches the project just chosen.
+      if (!(S.launch.servers || []).length) probe();
+    });
     crumb.appendChild(use);
 
     list.innerHTML = "";
@@ -4919,6 +4935,88 @@ function launchView(wrap) {
   });
   wrap.appendChild(targetPanel);
 
+  /** Start the shown command here, stream its output, adopt its URL. */
+  function devRunner(dev) {
+    const box = el("div", "");
+    box.style.marginTop = "10px";
+    const row = el("div", "row");
+    const btn = el("button", "btn", `▶ Start it for me`);
+    btn.type = "button";
+    const note = el("span", "hint", "");
+    row.append(btn, note);
+    const out = el("div", "feed");
+    out.style.cssText = "display:none;max-height:150px;margin-top:10px";
+    box.append(row, out);
+
+    const paint = (d) => {
+      out.style.display = d.lines.length ? "" : "none";
+      out.innerHTML = "";
+      for (const l of d.lines.slice(-14)) out.appendChild(el("div", "ev", `<span>${esc(l)}</span>`));
+      out.scrollTop = out.scrollHeight;
+    };
+
+    let polling = false;
+    async function poll() {
+      if (polling) return;
+      polling = true;
+      for (let i = 0; i < 160; i++) {          // 90s ceiling, matching the server
+        const { dev: d } = await api("/api/dev/status");
+        paint(d);
+        if (d.state === "ready") {
+          note.innerHTML = `✓ up at <code>${esc(d.url)}</code>`;
+          const lead = box.parentElement?.firstChild;
+          if (lead && lead.nodeType === 3) lead.textContent = "✅ Your app is running — started from here. ";
+          btn.textContent = "Stop it";
+          btn.className = "btn danger";
+          btn.disabled = false;
+          // Adopt it as the target — that is the whole point of starting it.
+          S.launch.target = d.url;
+          manual.querySelector("input").value = d.url;
+          paintChoices();
+          refreshEstimate();
+          break;
+        }
+        if (d.state === "failed") {
+          note.textContent = d.error || "it didn't start";
+          btn.textContent = "▶ Try again";
+          btn.disabled = false;
+          break;
+        }
+        if (d.state !== "starting") break;
+        await new Promise((r) => setTimeout(r, 600));
+      }
+      polling = false;
+    }
+
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      if (btn.textContent === "Stop it") {
+        await api("/api/dev/stop", {});
+        btn.textContent = "▶ Start it for me";
+        btn.className = "btn";
+        btn.disabled = false;
+        note.textContent = "stopped";
+        out.style.display = "none";
+        return;
+      }
+      note.textContent = `running ${dev.command}…`;
+      try {
+        await api("/api/dev/start", { repoPath: S.launch.dir });
+        poll();
+      } catch (e) {
+        note.textContent = e.message;
+        btn.disabled = false;
+      }
+    });
+
+    // A dev server may already be up from an earlier visit.
+    api("/api/dev/status").then(({ dev: d }) => {
+      if (d.state === "ready" || d.state === "starting") { btn.disabled = true; poll(); }
+    }).catch(() => {});
+
+    return box;
+  }
+
   async function probe() {
     srvBox.innerHTML = "";
     srvBox.appendChild(el("div", "empty", "Looking for a dev server…"));
@@ -4927,8 +5025,31 @@ function launchView(wrap) {
     S.launch.servers = servers;
     srvBox.innerHTML = "";
     if (!servers.length) {
-      // The single most common first-run failure. Name it, don't show a void.
-      srvBox.appendChild(el("div", "banner", "🔍 Nothing's running on the usual ports yet. Your testers need a <b>live</b> app to click around in — start it up (usually <code>npm run dev</code>) and hit re-probe."));
+      // The single most common first-run failure. Name it, and hand over the
+      // exact command for THIS project rather than a generic guess.
+      const banner = el("div", "banner", "🔍 Nothing's running on the usual ports yet. Your testers need a <b>live</b> app to click around in — start it below, or run it yourself and hit re-probe.");
+      srvBox.appendChild(banner);
+      if (S.launch.dir) {
+        try {
+          const { dev } = await apiGet("/api/dev-command?repo=" + encodeURIComponent(S.launch.dir));
+          if (dev) {
+            if (dev.needsInstall) {
+              banner.appendChild(cmdRow(dev.installCommand, "Dependencies aren't installed yet — run this first."));
+            }
+            banner.appendChild(cmdRow(
+              dev.command,
+              dev.candidates.length > 1
+                ? `From your package.json. Other options: ${dev.candidates.slice(1).map(esc).join(", ")}.`
+                : "From your package.json."
+            ));
+            // Offer to run it — but only ever the command shown above, and only
+            // on a click. Nothing is inferred and nothing runs on its own.
+            if (!dev.needsInstall) banner.appendChild(devRunner(dev));
+          }
+        } catch {
+          // No package.json, or an unreadable one — the generic advice still stands.
+        }
+      }
     }
     for (const sv of servers) {
       const row = el("div", "srv" + (S.launch.target === sv.url ? " sel" : ""));
@@ -4995,7 +5116,8 @@ function launchView(wrap) {
       const card = el("button", "preset" + (S.launch.preset === p.id ? " on" : ""));
       card.type = "button";
       card.setAttribute("aria-pressed", String(S.launch.preset === p.id));
-      card.innerHTML = `<div class="nm">${p.name}<span class="cost">${q ? "~$" + q.costUsd.toFixed(2) : "—"}</span></div>
+      const shown = q ? (q.typicalUsd ?? q.costUsd) : null;
+      card.innerHTML = `<div class="nm">${p.name}<span class="cost">${shown === null ? "—" : "~$" + shown.toFixed(2)}</span></div>
         <div class="desc">${esc(p.desc)}${q && q.eta ? ` · about ${esc(q.eta.replace("~", ""))}` : ""}</div>`;
       card.addEventListener("click", () => {
         applyPreset(p.id);
@@ -5059,19 +5181,25 @@ function launchView(wrap) {
     S.launch.estimate = est;
     estBox.innerHTML = "";
     const grid = el("div", "estimate");
+    const typical = est.typicalUsd ?? est.costUsd;
     grid.innerHTML = `
-      <div><div class="k">Cost</div><div class="v">~$${est.costUsd.toFixed(2)}</div></div>
+      <div><div class="k">Cost</div><div class="v">~$${typical.toFixed(2)}</div></div>
       <div><div class="k">Time</div><div class="v">${est.eta ? esc(est.eta.replace("~", "")) : "unknown"}</div></div>
       <div><div class="k">LLM calls</div><div class="v">~${est.calls}</div></div>
       <div><div class="k">Personas</div><div class="v">${est.testers.length}</div></div>
       <div><div class="k">Model</div><div class="v" style="font-size:13px">${esc(est.model)}</div></div>`;
     estBox.appendChild(grid);
+    // A single number was always a fiction: personas stop early, so the
+    // budget-shaped figure is a ceiling. Say which is which.
+    estBox.appendChild(el("div", "hint", est.basis === "measured"
+      ? `Typical for runs like yours, measured from your own history. The ceiling — every tester using every step — is <b>$${est.costUsd.toFixed(2)}</b>, and the run stops there.`
+      : `Estimated from token assumptions; no completed runs to learn from yet. Real runs usually come in well under this.`));
     if (!est.eta) estBox.appendChild(el("div", "hint", "No run history yet, so the time estimate is blank — this run will teach it."));
     if (est.exceedsCostCap) {
       estBox.appendChild(el("div", "banner", `This estimate is over your <code>max_cost_usd</code> cap of $${est.caps.maxCostUsd.toFixed(2)} — the run will stop early when the cap is hit.`));
     }
     go.disabled = false;
-    go.textContent = `Start the run · ~$${est.costUsd.toFixed(2)}`;
+    go.textContent = `Start the run · ~$${(est.typicalUsd ?? est.costUsd).toFixed(2)}`;
   }
   refreshEstimate();
 

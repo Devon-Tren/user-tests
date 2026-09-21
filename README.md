@@ -85,7 +85,7 @@ npm run dev                                    # leave it running
 
 usertests run                                  # auto-detects the dev server, uses this folder as repo context
 usertests run --target http://localhost:5191   # or name the server explicitly
-usertests run --steps 5                        # quick sanity pass first (~1 min, ~$0.10)
+usertests run --steps 5                        # quick sanity pass first (~2 min, ~$0.20)
 ```
 
 Three things worth knowing:
@@ -395,7 +395,7 @@ GET  /demo.mp4                      the walkthrough, if one is installed
 | `Multiple local servers are running` | pass `--target http://localhost:<port>` |
 | Target unreachable | start your dev server first; the CLI validates before spending anything |
 | Browser errors on launch | `npx playwright install chromium` |
-| Architecture tab says *no code graph* | install mapd, or paste the repo's absolute path into the box (older runs didn't record it) |
+| Architecture tab says *no code graph* | mapd isn't on npm yet — build it from source, or paste the repo's absolute path into the box (older runs didn't record it) |
 | `usertests: command not found` | `npm link`, or call `node dist/cli.js` / `npx tsx src/cli.ts` |
 | Run stopped early | a cap in `limits:` was hit — the chair still reports what was gathered and marks the run `PARTIAL` |
 | Port 7842 in use | `usertests serve --port 7900` |

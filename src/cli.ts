@@ -159,6 +159,9 @@ program
       target: config.target,
       repo_path: config.repo_path,
       testers: activeTesters.length,
+      // Needed to normalise how much of the budget personas actually use —
+      // without it, past runs cannot calibrate future cost estimates.
+      max_steps_per_agent: config.max_steps_per_agent,
       persona_hashes: personaHashes,
     });
     logger.event("eta", { estimate_seconds: etaSeconds });
