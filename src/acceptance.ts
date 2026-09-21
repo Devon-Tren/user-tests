@@ -32,7 +32,10 @@ const PLANTED_ISSUES: PlantedIssue[] = [
     matches: (_f, text) =>
       /(sign\s*up|submit|form)/i.test(text)
       && /(empty|blank|required|without (?:an )?email|without (?:a )?password)/i.test(text)
-      && /(white\s*screen|blank\s*page|crash|disappear|no (?:elements|ui))/i.test(text),
+      // "blank screen" is how models most often describe a wiped DOM, and the
+      // adjective in "no interactive elements" used to break the last branch.
+      // Both are the planted white-screen bug; only the wording differs.
+      && /(white\s*screen|blank\s*(?:page|screen)|crash|disappear|no [\w\s-]{0,20}?(?:elements|ui|content)\b)/i.test(text),
   },
   {
     name: "Unlabeled email input",

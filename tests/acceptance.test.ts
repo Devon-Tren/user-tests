@@ -70,3 +70,59 @@ test("acceptance excludes appendix false positives and unrelated uses of Tab", (
   assert.equal(results.find((result) => result.name === "Keyboard focus trap")?.found, false);
   assert.equal(results.find((result) => result.name === "Empty-submit white screen")?.found, false);
 });
+
+test("the white-screen matcher accepts how models actually word it", () => {
+  // Regression: a real run (2026-09-21) surfaced planted bug #2 correctly and
+  // the harness scored it MISSED, because the matcher demanded "white screen"
+  // or "blank page" while the model wrote "blank screen" / "no interactive
+  // elements". The council was right; the test was wrong. 3/5 vs a true 4/5.
+  const asReported = [{
+    code: "C-2",
+    section: "main",
+    severity: "critical",
+    title: "Blank screen after attempting sign up",
+    repro: "confirmed",
+    steps: [
+      "1. Go to the homepage.",
+      "2. Click on the sign up button with empty fields.",
+      "3. Observe the app transitions to a blank screen with no interactive elements.",
+    ],
+    expected: "Should remain on the sign up page and display validation errors for empty required fields.",
+    actual: "App navigates to a blank, unusable screen with no way to recover except browser navigation.",
+  }];
+  const hit = evaluateFixtureAcceptance(asReported).find((r) => r.name === "Empty-submit white screen");
+  assert.equal(hit?.found, true, "a correct detection must not be scored as a miss");
+  assert.equal(hit?.code, "C-2");
+
+  // The original phrasing must still match — widening, not replacing.
+  const classic = [{
+    section: "main",
+    code: "C-9",
+    repro: "confirmed",
+    title: "Signup form white-screens on empty submit",
+    steps: ["Submit the form empty"],
+    expected: "validation errors",
+    actual: "the app white screens",
+  }];
+  assert.equal(
+    evaluateFixtureAcceptance(classic).find((r) => r.name === "Empty-submit white screen")?.found,
+    true
+  );
+
+  // ...and it must still be possible to MISS it. A form complaint that is not
+  // about a wiped DOM should not be credited as the planted crash.
+  const unrelated = [{
+    section: "main",
+    code: "M-9",
+    repro: "confirmed",
+    title: "Signup form has no inline validation",
+    steps: ["Submit the form with an empty email"],
+    expected: "an inline error",
+    actual: "the button just does nothing at all",
+  }];
+  assert.equal(
+    evaluateFixtureAcceptance(unrelated).find((r) => r.name === "Empty-submit white screen")?.found,
+    false,
+    "the matcher must still be able to say no"
+  );
+});
