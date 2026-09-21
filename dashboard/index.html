@@ -35,7 +35,7 @@ body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;bac
 @keyframes drift{from{transform:translate3d(-2%,-1%,0) scale(1)}to{transform:translate3d(2%,2%,0) scale(1.06)}}
 header{display:flex;align-items:center;gap:14px;padding:12px 22px;border-bottom:1px solid var(--border);
   background:rgba(10,14,26,.65);backdrop-filter:blur(18px) saturate(1.4);position:sticky;top:0;z-index:10}
-header h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.4px}
+header h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.4px;white-space:nowrap;flex:none}
 header .logo{color:var(--accent);filter:drop-shadow(0 0 8px rgba(110,168,255,.8));display:inline-block;animation:pulse 3s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
 select{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:7px 10px;font-size:13px;max-width:360px;outline:none;transition:border-color .2s, box-shadow .2s}
@@ -102,6 +102,132 @@ button.btn:disabled{opacity:.55;cursor:default;transform:none}
 .explain .md code{background:var(--panel2);padding:1px 6px;border-radius:5px;font-size:12px}
 .explain .md pre{background:var(--panel2);padding:10px;border-radius:8px;overflow-x:auto}
 .explain .md ul,.explain .md ol{margin:7px 0;padding-left:20px}
+/* welcome: the one-time "what is this?" walkthrough */
+#welcome{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;padding:20px;
+  background:rgba(4,7,14,.82);backdrop-filter:blur(14px) saturate(1.2)}
+#welcome.open{display:flex;animation:wFade .28s ease}
+@keyframes wFade{from{opacity:0}to{opacity:1}}
+.wcard{width:min(760px,100%);max-height:92vh;overflow-y:auto;background:linear-gradient(165deg, rgba(30,38,64,.92), rgba(16,21,38,.94));
+  border:1px solid var(--border-hi);border-radius:26px;padding:34px 34px 24px;text-align:center;
+  box-shadow:0 30px 90px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.08);animation:wPop .42s cubic-bezier(.2,1.1,.35,1)}
+@keyframes wPop{from{transform:translateY(22px) scale(.96);opacity:0}to{transform:none;opacity:1}}
+.wcard .emoji{font-size:52px;line-height:1;display:block;margin-bottom:14px;animation:wBob 3.2s ease-in-out infinite}
+@keyframes wBob{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-8px) rotate(2deg)}}
+.wcard h2{font-size:26px;margin:0 0 10px;font-weight:800;letter-spacing:-.3px;text-transform:none;color:var(--text)}
+.wcard .lede{color:var(--muted);font-size:15px;line-height:1.65;margin:0 auto 20px;max-width:470px}
+.wcard .lede b{color:var(--text)}
+.wcrew{display:grid;grid-template-columns:1fr 1fr;gap:11px;text-align:left;margin-bottom:6px}
+@media (max-width:520px){.wcrew{grid-template-columns:1fr}}
+.wperson{background:rgba(7,11,20,.5);border:1px solid var(--border);border-radius:18px;padding:13px 15px;
+  transition:transform .25s cubic-bezier(.2,1.1,.35,1), border-color .25s}
+.wperson:hover{transform:translateY(-3px);border-color:var(--border-hi)}
+.wperson .who{font-size:13.5px;font-weight:700;display:flex;align-items:center;gap:7px;margin-bottom:4px}
+.wperson .who .e{font-size:17px}
+.wperson .what{color:var(--muted);font-size:12.5px;line-height:1.5}
+.wfacts{display:grid;gap:11px;text-align:left;margin-bottom:6px}
+.wfact{display:flex;gap:13px;align-items:flex-start;background:rgba(7,11,20,.5);border:1px solid var(--border);border-radius:18px;padding:14px 16px}
+.wfact .e{font-size:24px;line-height:1.2;flex:none}
+.wfact b{display:block;font-size:13.5px;margin-bottom:3px}
+.wfact span{color:var(--muted);font-size:12.5px;line-height:1.55}
+.wvideo{position:relative;border-radius:18px;overflow:hidden;border:1px solid var(--border-hi);
+  background:#05070d;box-shadow:0 18px 50px rgba(0,0,0,.55);margin-bottom:4px}
+.wvideo video{display:block;width:100%;height:auto;background:#05070d}
+.wvideo .play{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
+  cursor:pointer;background:radial-gradient(58% 58% at 50% 50%, rgba(6,9,17,.30), rgba(4,7,14,.62));
+  transition:opacity .45s ease;border:none;color:var(--text);font:inherit;width:100%}
+.wvideo .play .disc{width:74px;height:74px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:26px;padding-left:5px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;
+  box-shadow:0 12px 34px rgba(110,140,255,.55), inset 0 1px 0 rgba(255,255,255,.3);
+  transition:transform .3s cubic-bezier(.2,1.1,.35,1)}
+.wvideo .play:hover .disc{transform:scale(1.09)}
+.wvideo .play span{font-size:12.5px;color:var(--muted);letter-spacing:.3px}
+.wvideo.playing .play{opacity:0;pointer-events:none}
+.wnav{display:flex;align-items:center;gap:12px;margin-top:22px;padding-top:18px;border-top:1px solid var(--border)}
+.wdots{display:flex;gap:7px;margin:0 auto}
+.wdots i{width:8px;height:8px;border-radius:50%;background:var(--border-hi);transition:all .3s cubic-bezier(.2,1.1,.35,1)}
+.wdots i.on{background:linear-gradient(135deg,var(--accent),var(--accent2));width:24px;border-radius:999px;box-shadow:0 0 12px rgba(110,168,255,.5)}
+/* start: setup / launch / live run */
+.start-wrap{max-width:880px;margin:0 auto}
+.start-wrap .panel{border-radius:24px;padding:24px 26px}
+.start-wrap .panel h2{font-size:12.5px;letter-spacing:1.4px;color:var(--accent);opacity:.9}
+.start-hero{text-align:center;padding:30px 18px 10px}
+.start-hero .emoji{font-size:46px;line-height:1;display:block;margin-bottom:12px;animation:wBob 3.6s ease-in-out infinite}
+.start-hero h2{font-size:27px;margin:0 0 10px;letter-spacing:-.4px;text-transform:none;color:var(--text);font-weight:800}
+.start-hero p{color:var(--muted);margin:0 auto;max-width:540px;font-size:14.5px;line-height:1.65}
+.start-hero .howbtn{margin-top:14px}
+.check{display:flex;gap:14px;align-items:flex-start;padding:13px;border-radius:16px;margin-bottom:6px;
+  background:rgba(7,11,20,.34);border:1px solid transparent;transition:border-color .25s, transform .25s cubic-bezier(.2,1.1,.35,1)}
+.check:hover{border-color:var(--border);transform:translateX(2px)}
+.check:last-child{margin-bottom:0}
+.check .mark{flex:none;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700}
+.check.ok .mark{color:var(--ok);background:rgba(63,214,143,.14);box-shadow:0 0 0 1px rgba(63,214,143,.35), 0 0 16px rgba(63,214,143,.2)}
+.check.bad .mark{color:var(--critical);background:rgba(255,93,115,.14);box-shadow:0 0 0 1px rgba(255,93,115,.45), 0 0 16px rgba(255,93,115,.22);animation:pulse 2.4s ease-in-out infinite}
+.check.warn .mark{color:var(--minor);background:rgba(255,209,102,.12);box-shadow:0 0 0 1px rgba(255,209,102,.4)}
+.check .body{flex:1;min-width:0;padding-top:3px}
+.check .body b{font-size:14px}
+.check .body .detail{color:var(--muted);font-size:12.5px;margin-top:3px;line-height:1.5}
+.fixcmd{display:flex;align-items:center;gap:9px;margin-top:9px;background:rgba(7,11,20,.8);border:1px solid var(--border);border-radius:13px;padding:8px 8px 8px 13px;font-size:12px}
+.fixcmd code{flex:1;overflow-x:auto;white-space:nowrap;color:var(--accent)}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:6px;font-weight:600}
+.field input,.field select{width:100%;background:rgba(7,11,20,.8);border:1px solid var(--border);border-radius:14px;
+  color:var(--text);padding:11px 15px;font:inherit;font-size:13.5px;transition:border-color .2s, box-shadow .2s}
+.field input:focus,.field select:focus{border-color:var(--border-hi);outline:none;box-shadow:0 0 0 3px rgba(110,168,255,.15)}
+.field .hint{color:var(--muted);font-size:11.5px;margin-top:5px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.start-wrap button.btn,#welcome button.btn{border-radius:999px;padding:11px 22px;font-size:13px;
+  transition:transform .22s cubic-bezier(.2,1.1,.35,1), box-shadow .22s, filter .22s}
+.start-wrap button.btn:hover,#welcome button.btn:hover{transform:translateY(-2px) scale(1.03)}
+.btn.ghost{background:none;border:1px solid var(--border-hi);color:var(--text);box-shadow:none}
+.btn.ghost:hover{background:var(--panel2);box-shadow:none;transform:translateY(-1px)}
+.btn.danger{background:linear-gradient(135deg,#ff5d73,#c9384f);box-shadow:0 6px 18px rgba(255,93,115,.3), inset 0 1px 0 rgba(255,255,255,.25)}
+.crumb{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-bottom:10px;flex-wrap:wrap}
+.crumb code{color:var(--text);background:rgba(7,11,20,.7);padding:3px 8px;border-radius:7px;font-size:12px}
+.dirlist{max-height:272px;overflow-y:auto;border:1px solid var(--border);border-radius:18px;background:rgba(7,11,20,.55);padding:6px}
+.dirlist .dir{display:flex;align-items:center;gap:11px;padding:10px 13px;cursor:pointer;border-radius:13px;font-size:13.5px;
+  transition:background .18s, transform .18s cubic-bezier(.2,1.1,.35,1)}
+.dirlist .dir:hover,.dirlist .dir:focus-visible{background:var(--panel2);transform:translateX(3px)}
+.dirlist .dir .ico{flex:none;opacity:.75}
+.dirlist .dir .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.srv{display:flex;align-items:center;gap:11px;padding:12px 15px;border:1px solid var(--border);border-radius:16px;cursor:pointer;margin-bottom:9px;font-size:13.5px;
+  transition:border-color .2s, background .2s, transform .22s cubic-bezier(.2,1.1,.35,1)}
+.srv:hover,.srv:focus-visible{border-color:var(--border-hi);background:var(--panel2);transform:translateY(-2px)}
+.srv.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent), var(--glow-a)}
+.srv .port{font-weight:700;color:var(--accent)}
+.srv .ttl{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.presets{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+@media (max-width:560px){.presets{grid-template-columns:1fr}}
+.preset{text-align:left;background:rgba(7,11,20,.5);border:1px solid var(--border);border-radius:18px;padding:15px 17px;
+  cursor:pointer;color:var(--text);font:inherit;transition:border-color .22s, transform .22s cubic-bezier(.2,1.1,.35,1), box-shadow .22s}
+.preset:hover{transform:translateY(-2px);border-color:var(--border-hi)}
+.preset.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent), 0 10px 30px rgba(80,120,255,.22);
+  background:linear-gradient(135deg, rgba(110,168,255,.13), rgba(154,110,255,.09))}
+.preset .nm{font-size:14.5px;font-weight:700;display:flex;align-items:center;gap:8px}
+.preset .cost{margin-left:auto;font-size:15px;font-weight:800;color:var(--accent)}
+.preset .desc{color:var(--muted);font-size:12.5px;margin-top:5px;line-height:1.5}
+.who{display:flex;flex-wrap:wrap;gap:8px}
+.who button{background:rgba(7,11,20,.5);border:1px solid var(--border);border-radius:999px;padding:8px 15px;
+  color:var(--muted);font:inherit;font-size:12.5px;cursor:pointer;transition:all .2s cubic-bezier(.2,1.1,.35,1)}
+.who button:hover{color:var(--text);border-color:var(--border-hi);transform:translateY(-1px)}
+.who button.on{color:var(--text);border-color:var(--accent);background:rgba(110,168,255,.14);box-shadow:0 0 0 1px var(--accent)}
+.estimate{display:flex;gap:24px;flex-wrap:wrap;padding:18px 22px;border:1px solid var(--border-hi);border-radius:20px;
+  background:linear-gradient(120deg, rgba(110,168,255,.13), rgba(154,110,255,.09));margin:6px 0 16px;
+  box-shadow:0 8px 28px rgba(80,120,255,.14), inset 0 1px 0 rgba(255,255,255,.06)}
+.estimate div{min-width:78px}
+.estimate .k{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:600}
+.estimate .v{font-size:19px;font-weight:700;margin-top:2px}
+.feed{max-height:340px;overflow-y:auto;border:1px solid var(--border);border-radius:18px;background:rgba(7,11,20,.7);padding:13px 16px;
+  font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}
+.feed .ev{display:flex;gap:9px;padding:1px 0}
+.feed .ev .t{color:var(--muted);flex:none;opacity:.65}
+.feed .ev.error{color:var(--critical)}
+.feed .ev.finding{color:var(--minor)}
+.feed .ev.phase{color:var(--accent);font-weight:700}
+.feed .ev.persona{color:var(--goal)}
+.progress{height:6px;border-radius:999px;background:rgba(7,11,20,.8);border:1px solid var(--border);overflow:hidden;margin:12px 0}
+.progress i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .5s ease}
+.progress.indet i{width:38%;animation:slide 1.7s ease-in-out infinite}
+@keyframes slide{0%{margin-left:-38%}100%{margin-left:100%}}
 /* journey */
 .persona-lane{margin-bottom:20px}
 .persona-lane h3{font-size:13.5px;margin:0 0 10px;font-weight:700}
@@ -469,6 +595,7 @@ a.art-link:hover{color:var(--text);border-bottom-style:solid}
   <label class="sr-only" for="run-select">Choose a completed test run</label>
   <select id="run-select" title="Switch run" aria-label="Choose a completed test run"></select>
   <nav class="tabs" aria-label="Dashboard sections" role="tablist">
+    <button type="button" role="tab" aria-selected="false" data-tab="start">Start</button>
     <button type="button" role="tab" aria-selected="true" data-tab="project" class="active">Project</button>
     <button type="button" role="tab" aria-selected="false" data-tab="overview">Overview</button>
     <button type="button" role="tab" aria-selected="false" data-tab="journey">Journey</button>
@@ -481,6 +608,10 @@ a.art-link:hover{color:var(--text);border-bottom-style:solid}
   </nav>
 </header>
 <main id="main" tabindex="-1" aria-live="polite"></main>
+
+<div id="welcome" role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-hidden="true">
+  <div class="wcard" id="welcome-card"></div>
+</div>
 
 <button type="button" id="chat-fab" title="Chat about this run" aria-label="Open run analyst" aria-controls="chat-drawer" aria-expanded="false">💬</button>
 <div id="chat-drawer" role="dialog" aria-modal="true" aria-label="Run analyst" aria-hidden="true">
@@ -496,9 +627,14 @@ a.art-link:hover{color:var(--text);border-bottom-style:solid}
 <script>
 "use strict";
 // ---------------------------------------------------------------- state ---
-const TABS = ["project", "overview", "journey", "mindmap", "architecture", "findings", "artifacts", "history", "visual"];
+const TABS = ["start", "project", "overview", "journey", "mindmap", "architecture", "findings", "artifacts", "history", "visual"];
+// Substituted per-response by the "/" route in serve.ts. Every mutating call
+// carries it, so a stray local process cannot drive the launcher.
+const TOKEN = "__USERTESTS_TOKEN__";
 const requestedTab = new URLSearchParams(location.search).get("tab");
-const S = { runs: [], run: null, tab: TABS.includes(requestedTab) ? requestedTab : "project", chatHistory: [], chatCost: 0, lastArch: null, lastFinding: null, ctxNote: null, pins: [], artifacts: [] };
+const S = { runs: [], run: null, tab: TABS.includes(requestedTab) ? requestedTab : "project", chatHistory: [], chatCost: 0, lastArch: null, lastFinding: null, ctxNote: null, pins: [], artifacts: [],
+  // start-screen state
+  setup: null, launch: { dir: null, target: null, steps: null, servers: null, estimate: null, busy: false }, activeRun: null, feed: [], takeover: false };
 const $ = (sel) => document.querySelector(sel);
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -517,7 +653,15 @@ function countUp(node, target, dur = 750) {
 }
 
 async function api(path, opts) {
-  const res = await fetch(path, opts ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(opts) } : undefined);
+  const res = await fetch(path, opts ? { method: "POST", headers: { "content-type": "application/json", "x-usertests-token": TOKEN }, body: JSON.stringify(opts) } : undefined);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || res.statusText);
+  return body;
+}
+
+/** GET on a token-gated route (the folder browser discloses filesystem layout). */
+async function apiGet(path) {
+  const res = await fetch(path, { headers: { "x-usertests-token": TOKEN } });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || res.statusText);
   return body;
@@ -4323,11 +4467,784 @@ function artifactStrip(files, note) {
   return strip;
 }
 
+// -------------------------------------------------------------- welcome ---
+// A one-time explainer, because "a council of LLM agent personas user-tests
+// your app" means nothing to someone who has not read the README. Shown once
+// per browser, re-openable from the Start screen, and never in the way: Esc
+// and the backdrop both dismiss it.
+
+// Versioned on purpose: when the explainer materially changes — a new slide,
+// the walkthrough video — people who saw the old one have not seen this one.
+// Bump this and it shows once more, then goes quiet again.
+const WELCOME_KEY = "usertests.welcome.v2";
+
+const seenWelcome = () => {
+  try { return localStorage.getItem(WELCOME_KEY) === "1"; } catch { return false; }
+};
+const markWelcomeSeen = () => {
+  try { localStorage.setItem(WELCOME_KEY, "1"); } catch { /* private mode — it just shows again */ }
+};
+
+/** Prepended only when the server reports a walkthrough on disk. */
+const VIDEO_SLIDE = {
+  emoji: "🎬",
+  title: "See it end to end first",
+  lede: "Or skip ahead and read it — the next few cards cover the same ground.",
+  body: () => {
+    const box = el("div", "wvideo");
+    const v = document.createElement("video");
+    v.src = "/demo.mp4";
+    v.preload = "metadata";  // autoplay buffers what it needs; don't pull 12MB up front
+    v.playsInline = true;
+    v.controls = true;
+    v.muted = true;          // the only autoplay any browser will honour
+    v.autoplay = true;
+    v.setAttribute("aria-label", "User-Tests walkthrough");
+
+    const play = el("button", "play", `<span class="disc">🔊</span><span>Tap for sound · 1:41</span>`);
+    play.type = "button";
+    play.addEventListener("click", () => {
+      box.classList.add("playing");
+      v.muted = false;
+      // If they tap early they meant to watch it properly — start over so the
+      // opening line is not already gone.
+      if (v.currentTime < 4) v.currentTime = 0;
+      v.play().catch(() => {});
+    });
+
+    // Native controls can unmute too; keep the overlay honest about real state.
+    v.addEventListener("volumechange", () => box.classList.toggle("playing", !v.muted));
+    v.addEventListener("ended", () => { box.classList.remove("playing"); v.muted = true; });
+    v.play().catch(() => {}); // blocked autoplay just leaves the poster up
+    box.append(v, play);
+    return box;
+  },
+};
+
+const WELCOME_SLIDES = [
+  {
+    emoji: "👋",
+    title: "Four testers, one report",
+    lede: "User-Tests sends a small crew of AI testers through your app — really clicking, typing and breaking things in a real browser — then hands you <b>one ranked list</b> of what's wrong.",
+    body: () => null,
+  },
+  {
+    emoji: "🧑‍🤝‍🧑",
+    title: "Meet the crew",
+    lede: "Each one arrives with a different attitude, so they notice different things.",
+    body: () => {
+      const crew = el("div", "wcrew");
+      for (const p of [
+        ["🙂", "First-time user", "Never seen your app. Clicks what looks clickable and says so when a label lies."],
+        ["💥", "Chaos hunter", "Paste bombs, double-clicks, back mid-submit. Only reports what genuinely breaks."],
+        ["📋", "Goal-gap auditor", "Reads your repo, then checks every promise your docs make against the real UI."],
+        ["♿", "Accessibility & polish", "Keyboard only. Hunts missing labels, focus traps and unreachable controls."],
+      ]) {
+        crew.appendChild(el("div", "wperson",
+          `<div class="who"><span class="e">${p[0]}</span>${esc(p[1])}</div><div class="what">${esc(p[2])}</div>`));
+      }
+      return crew;
+    },
+  },
+  {
+    emoji: "⚖️",
+    title: "Then the chair tidies up",
+    lede: "A fifth agent merges everything into the list you actually read.",
+    body: () => {
+      const facts = el("div", "wfacts");
+      for (const f of [
+        ["🔗", "Dedupes", "Two testers describing the same bug differently become one finding — credited to both."],
+        ["🔁", "Verifies", "Replays each finding's steps in a fresh browser. Anything that won't reproduce is demoted, not dropped."],
+        ["📊", "Ranks", "Critical, major, minor — then writes one REPORT.md and everything you see in this dashboard."],
+      ]) facts.appendChild(el("div", "wfact", `<span class="e">${f[0]}</span><div><b>${esc(f[1])}</b><span>${esc(f[2])}</span></div>`));
+      return facts;
+    },
+  },
+  {
+    emoji: "🫵",
+    title: "Two honest caveats",
+    lede: "Better to hear them now than halfway through.",
+    body: () => {
+      const facts = el("div", "wfacts");
+      for (const f of [
+        ["🟢", "Your app has to be running", "The crew drives a real browser at a live URL, so start your app first — usually npm run dev. We'll find it for you."],
+        ["💸", "It spends real money", "A full run is roughly 5–15 minutes and $0.50–$1.25. You always see the estimate and press the button yourself."],
+      ]) facts.appendChild(el("div", "wfact", `<span class="e">${f[0]}</span><div><b>${esc(f[1])}</b><span>${esc(f[2])}</span></div>`));
+      return facts;
+    },
+  },
+];
+
+let welcomeIndex = 0;
+let welcomeReturnFocus = null;
+let welcomeDeck = WELCOME_SLIDES;
+
+/** Stop any playing tour before the card is torn down or navigated away from. */
+function haltWelcomeVideo() {
+  const v = document.querySelector("#welcome-card video");
+  if (v) { try { v.pause(); } catch {} }
+}
+
+function paintWelcome() {
+  haltWelcomeVideo();
+  const card = $("#welcome-card");
+  const slide = welcomeDeck[welcomeIndex];
+  card.innerHTML = `<span class="emoji">${slide.emoji}</span>
+    <h2 id="welcome-title">${esc(slide.title)}</h2>
+    <p class="lede">${slide.lede}</p>`;
+  const body = slide.body();
+  if (body) card.appendChild(body);
+
+  const nav = el("div", "wnav");
+  const first = welcomeIndex === 0;
+  const back = el("button", "btn ghost", first ? "Skip" : "Back");
+  back.type = "button";
+  back.addEventListener("click", () => {
+    if (first) return closeWelcome();
+    welcomeIndex -= 1;
+    paintWelcome();
+  });
+
+  const dots = el("div", "wdots");
+  welcomeDeck.forEach((_, i) => {
+    const dot = el("i", i === welcomeIndex ? "on" : "");
+    dot.setAttribute("role", "presentation");
+    dots.appendChild(dot);
+  });
+
+  const last = welcomeIndex === welcomeDeck.length - 1;
+  const next = el("button", "btn", last ? "Let's go" : "Next");
+  next.type = "button";
+  next.addEventListener("click", () => {
+    if (last) return closeWelcome();
+    welcomeIndex += 1;
+    paintWelcome();
+  });
+
+  nav.append(back, dots, next);
+  card.appendChild(nav);
+
+  next.focus();
+}
+
+function openWelcome() {
+  // Readiness tells us whether a tour is installed; without one the deck is
+  // exactly what it was before, so nothing here can break on a lean install.
+  welcomeDeck = S.setup && S.setup.demoVideo ? [VIDEO_SLIDE, ...WELCOME_SLIDES] : WELCOME_SLIDES;
+  welcomeIndex = 0;
+  welcomeReturnFocus = document.activeElement;
+  const box = $("#welcome");
+  box.classList.add("open");
+  box.setAttribute("aria-hidden", "false");
+  paintWelcome();
+}
+
+function closeWelcome() {
+  haltWelcomeVideo();
+  const box = $("#welcome");
+  box.classList.remove("open");
+  box.setAttribute("aria-hidden", "true");
+  markWelcomeSeen();
+  if (welcomeReturnFocus && welcomeReturnFocus.isConnected) welcomeReturnFocus.focus();
+  welcomeReturnFocus = null;
+}
+
+function wireWelcome() {
+  const box = $("#welcome");
+  // Clicking the backdrop (not the card) dismisses — the usual expectation.
+  box.addEventListener("click", (e) => { if (e.target === box) closeWelcome(); });
+  document.addEventListener("keydown", (e) => {
+    if (!box.classList.contains("open")) return;
+    if (e.key === "Escape") { e.preventDefault(); closeWelcome(); }
+    if (e.key === "ArrowRight" && welcomeIndex < welcomeDeck.length - 1) { welcomeIndex += 1; paintWelcome(); }
+    if (e.key === "ArrowLeft" && welcomeIndex > 0) { welcomeIndex -= 1; paintWelcome(); }
+    // Keep focus inside the dialog, but CYCLE it — blocking Tab outright
+    // stranded keyboard users on whichever control happened to be focused.
+    if (e.key === "Tab") {
+      const focusable = [...box.querySelectorAll("button, video, [href], input, [tabindex]:not([tabindex='-1'])")]
+        .filter((n) => !n.disabled && n.offsetParent !== null);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const at = focusable.indexOf(document.activeElement);
+      if (e.shiftKey && (at <= 0)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && at === focusable.length - 1) { e.preventDefault(); first.focus(); }
+      // anything in between is a normal Tab — let the browser do it
+    }
+  });
+}
+
+// ---------------------------------------------------------------- start ---
+// The front door. Three states, chosen from real readiness rather than from a
+// wizard step counter: Setup (something is missing), Launch (ready to run),
+// Running (a run is in flight). Nothing here costs a token except pressing
+// Start — and "Test key", which says its own price first.
+
+let ES = null; // live EventSource, or null
+
+const fmtClock = (s) => {
+  if (s == null || !isFinite(s)) return "—";
+  const m = Math.floor(s / 60);
+  return m > 0 ? `${m}m ${String(Math.round(s % 60)).padStart(2, "0")}s` : `${Math.round(s)}s`;
+};
+
+async function loadSetup() {
+  try { S.setup = await api("/api/setup"); } catch (e) { S.setup = { error: e.message, checks: [], ready: false }; }
+}
+
+async function renderStart() {
+  const main = $("#main");
+  main.innerHTML = "";
+  const wrap = el("div", "start-wrap");
+  main.appendChild(wrap);
+
+  if (!S.setup) {
+    wrap.appendChild(el("div", "empty", "Checking what's ready…"));
+    await loadSetup();
+    // A run may already be in flight from a previous page load.
+    try { const st = await api("/api/run/status"); if (st.active) S.activeRun = st.run; } catch {}
+    return renderStart();
+  }
+
+  if (S.activeRun && ["starting", "running"].includes(S.activeRun.state)) return runningView(wrap);
+  if (!S.setup.ready) return setupView(wrap);
+  return launchView(wrap);
+}
+
+// -- Setup ------------------------------------------------------------------
+
+function checkRow(c) {
+  const row = el("div", "check " + (c.ok ? "ok" : c.blocking ? "bad" : "warn"));
+  row.appendChild(el("div", "mark", c.ok ? "✓" : c.blocking ? "!" : "·"));
+  const body = el("div", "body");
+  body.appendChild(el("div", "", `<b>${esc(c.label)}</b>`));
+  body.appendChild(el("div", "detail", esc(c.detail)));
+  if (!c.ok && c.fixCommand) {
+    const fix = el("div", "fixcmd", `<code>${esc(c.fixCommand)}</code>`);
+    const copy = el("button", "btn ghost", "Copy");
+    copy.type = "button";
+    copy.addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(c.fixCommand); copy.textContent = "Copied"; }
+      catch { copy.textContent = "Select it"; }
+      setTimeout(() => { copy.textContent = "Copy"; }, 1600);
+    });
+    fix.appendChild(copy);
+    body.appendChild(fix);
+  }
+  row.appendChild(body);
+  return row;
+}
+
+/** Re-open the explainer from anywhere on the Start screen. */
+function howBtn() {
+  const b = el("button", "btn ghost howbtn", "✨ How does this work?");
+  b.type = "button";
+  b.addEventListener("click", openWelcome);
+  return b;
+}
+
+function setupView(wrap) {
+  const hero = el("div", "start-hero", `<span class="emoji">🚀</span>
+    <h2>Let's get you set up</h2>
+    <p>Almost there — just a couple of boxes to tick, then your crew of testers can get to work.</p>`);
+  hero.appendChild(howBtn());
+  wrap.appendChild(hero);
+
+  const p = el("div", "panel", "<h2>What's ready</h2>");
+  if (S.setup.error) p.appendChild(el("div", "banner", esc(S.setup.error)));
+  for (const c of S.setup.checks) p.appendChild(checkRow(c));
+  wrap.appendChild(p);
+
+  const needsKey = S.setup.checks.some((c) => c.id === "apiKey" && !c.ok);
+  const keyPanel = el("div", "panel", `<h2>${needsKey ? "API key" : "Change your API key"}</h2>`);
+
+  const provField = el("div", "field", `<label for="su-provider">Provider</label>
+    <select id="su-provider"><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option></select>`);
+  keyPanel.appendChild(provField);
+  provField.querySelector("select").value = S.setup.provider || "anthropic";
+
+  const keyField = el("div", "field", `<label for="su-key">Paste your key</label>
+    <input id="su-key" type="password" autocomplete="off" spellcheck="false" placeholder="${needsKey ? "sk-…" : "leave blank to keep " + esc(S.setup.keyHint || "the current key")}">
+    <div class="hint">Written to <code>.env</code> in the tool's folder at mode 0600. It is never sent to the browser, never put on a command line, and is stripped from <code>run.log</code>.</div>`);
+  keyPanel.appendChild(keyField);
+
+  const status = el("div", "hint", "");
+  const row = el("div", "row");
+  const save = el("button", "btn", "Save and continue");
+  save.type = "button";
+  save.addEventListener("click", async () => {
+    const key = keyField.querySelector("input").value.trim();
+    const provider = provField.querySelector("select").value;
+    if (!key && needsKey) { status.textContent = "Paste a key first."; return; }
+    save.disabled = true;
+    status.textContent = "Saving…";
+    try {
+      S.setup = await api("/api/setup", key ? { apiKey: key, provider } : { provider });
+      keyField.querySelector("input").value = "";
+      // Setup just succeeded, so the rest of the dashboard may have become
+      // usable — recompute rather than leaving the tab bar hidden.
+      S.takeover = !S.setup.ready || S.runs.length === 0 || Boolean(S.activeRun);
+      applyTakeover();
+      render();
+    } catch (e) {
+      status.textContent = e.message;
+      save.disabled = false;
+    }
+  });
+  row.appendChild(save);
+
+  const recheck = el("button", "btn ghost", "Re-check");
+  recheck.type = "button";
+  recheck.addEventListener("click", async () => { S.setup = null; render(); });
+  row.appendChild(recheck);
+  row.appendChild(status);
+  keyPanel.appendChild(row);
+  wrap.appendChild(keyPanel);
+}
+
+// -- Launch -----------------------------------------------------------------
+
+function launchView(wrap) {
+  const hero = el("div", "start-hero", `<span class="emoji">🎬</span>
+    <h2>New run</h2>
+    <p>Point your crew at a project and a running app. You'll see exactly what it costs before a penny is spent.</p>`);
+  hero.appendChild(howBtn());
+  wrap.appendChild(hero);
+
+  // 1. repo folder — the OS picker first, the in-page browser as the fallback
+  const repoPanel = el("div", "panel", "<h2>1 · Which project?</h2>");
+  const pickRow = el("div", "row");
+  pickRow.style.marginBottom = "12px";
+  const pickBtn = el("button", "btn", "📁 Choose a folder…");
+  pickBtn.type = "button";
+  const pickNote = el("span", "hint", "");
+  pickRow.append(pickBtn, pickNote);
+  repoPanel.appendChild(pickRow);
+
+  const browseToggle = el("button", "btn ghost", "Browse here instead");
+  browseToggle.type = "button";
+  const browseBox = el("div", "");
+  browseBox.style.display = "none";
+  const crumb = el("div", "crumb");
+  const list = el("div", "dirlist");
+  browseBox.append(crumb, list);
+  repoPanel.append(browseToggle, browseBox);
+  const picked = el("div", "hint", "");
+  picked.style.marginTop = "12px";
+  repoPanel.appendChild(picked);
+  wrap.appendChild(repoPanel);
+
+  browseToggle.addEventListener("click", () => {
+    const open = browseBox.style.display === "none";
+    browseBox.style.display = open ? "" : "none";
+    browseToggle.textContent = open ? "Hide the folder list" : "Browse here instead";
+    if (open) loadDir(S.launch.dir);
+  });
+
+  pickBtn.addEventListener("click", async () => {
+    pickBtn.disabled = true;
+    pickNote.textContent = "Finder is open — pick your project folder…";
+    try {
+      const r = await api("/api/fs/pick", {});
+      if (r.cancelled) {
+        pickNote.textContent = "No folder chosen.";
+      } else {
+        S.launch.dir = r.path;
+        S.launch.estimate = null;
+        pickNote.textContent = "";
+        showPicked();
+        paintChoices();
+        refreshEstimate();
+      }
+    } catch (e) {
+      // Headless box, no zenity, locked-down machine — the browser still works.
+      pickNote.textContent = e.message;
+      browseBox.style.display = "";
+      browseToggle.textContent = "Hide the folder list";
+      loadDir(S.launch.dir);
+    }
+    pickBtn.disabled = false;
+  });
+
+  const showPicked = () => {
+    picked.innerHTML = S.launch.dir
+      ? `✓ Testing <code>${esc(S.launch.dir)}</code>`
+      : "Pick the folder your app lives in — User-Tests reads it for context while it tests the live site.";
+  };
+
+  async function loadDir(path) {
+    list.innerHTML = "";
+    crumb.innerHTML = "";
+    list.appendChild(el("div", "empty", "Reading…"));
+    let d;
+    try { d = await apiGet("/api/fs/list" + (path ? "?path=" + encodeURIComponent(path) : "")); }
+    catch (e) { list.innerHTML = ""; list.appendChild(el("div", "empty", esc(e.message))); return; }
+
+    if (d.nativePicker === false) pickRow.style.display = "none";
+    crumb.appendChild(el("span", "", `<code>${esc(d.label)}</code>`));
+    if (d.parent) {
+      const up = el("button", "btn ghost", "↑ Up");
+      up.type = "button";
+      up.addEventListener("click", () => loadDir(d.parent));
+      crumb.appendChild(up);
+    }
+    const use = el("button", "btn" + (d.isRepo ? "" : " ghost"), "Use this folder");
+    use.type = "button";
+    use.addEventListener("click", () => { S.launch.dir = d.path; S.launch.estimate = null; showPicked(); refreshEstimate(); });
+    crumb.appendChild(use);
+
+    list.innerHTML = "";
+    if (!d.entries.length) { list.appendChild(el("div", "empty", "No sub-folders here.")); return; }
+    for (const e of d.entries) {
+      const row = el("div", "dir");
+      row.innerHTML = `<span class="ico">${e.isRepo ? "◆" : "▸"}</span><span class="nm">${esc(e.name)}</span>` +
+        (e.isRepo ? `<span class="pill ok">repo</span>` : "");
+      makeInteractive(row, `Open folder ${e.name}`, () => loadDir(e.path));
+      list.appendChild(row);
+    }
+  }
+  showPicked();
+
+  // 2. target url
+  const targetPanel = el("div", "panel", "<h2>2 · Which running app?</h2>");
+  const srvBox = el("div", "");
+  targetPanel.appendChild(srvBox);
+  const manual = el("div", "field", `<label for="lp-target">Or type the URL</label>
+    <input id="lp-target" type="url" placeholder="http://localhost:3000" value="${esc(S.launch.target || "")}">`);
+  targetPanel.appendChild(manual);
+  manual.querySelector("input").addEventListener("change", (ev) => {
+    S.launch.target = ev.target.value.trim();
+    srvBox.querySelectorAll(".srv").forEach((n) => n.classList.remove("sel"));
+    refreshEstimate();
+  });
+  wrap.appendChild(targetPanel);
+
+  async function probe() {
+    srvBox.innerHTML = "";
+    srvBox.appendChild(el("div", "empty", "Looking for a dev server…"));
+    let servers = [];
+    try { servers = (await api("/api/probe")).servers || []; } catch {}
+    S.launch.servers = servers;
+    srvBox.innerHTML = "";
+    if (!servers.length) {
+      // The single most common first-run failure. Name it, don't show a void.
+      srvBox.appendChild(el("div", "banner", "🔍 Nothing's running on the usual ports yet. Your testers need a <b>live</b> app to click around in — start it up (usually <code>npm run dev</code>) and hit re-probe."));
+    }
+    for (const sv of servers) {
+      const row = el("div", "srv" + (S.launch.target === sv.url ? " sel" : ""));
+      row.innerHTML = `<span class="port">:${sv.port}</span><span class="ttl">${esc(sv.title || sv.hint || "no title")}</span>`;
+      makeInteractive(row, `Test the app on port ${sv.port}`, () => {
+        S.launch.target = sv.url;
+        manual.querySelector("input").value = sv.url;
+        srvBox.querySelectorAll(".srv").forEach((n) => n.classList.remove("sel"));
+        row.classList.add("sel");
+        paintChoices();
+        refreshEstimate();
+      });
+      srvBox.appendChild(row);
+    }
+    const again = el("button", "btn ghost", "Re-probe");
+    again.type = "button";
+    again.addEventListener("click", probe);
+    srvBox.appendChild(again);
+  }
+  probe();
+
+  // 3. estimate + start
+  const goPanel = el("div", "panel", "<h2>3 · How deep a look?</h2>");
+  const presets = el("div", "presets");
+  const whoWrap = el("div", "field", `<label>Who should test it?</label>`);
+  const who = el("div", "who");
+  whoWrap.appendChild(who);
+  const estBox = el("div", "");
+  goPanel.append(presets, whoWrap, estBox);
+
+  // "Steps per persona" is a number only the author understands. People choose
+  // between a cheap look and a thorough one, so offer that instead and let the
+  // price for each be visible before either is picked.
+  const PRESETS = [
+    { id: "quick", name: "⚡ Quick pass", steps: 4, desc: "A fast sanity check. Each tester takes a handful of actions — enough to surface the obvious breakage." },
+    { id: "full", name: "🔍 Full run", steps: null, desc: "The real thing. Every tester explores properly and the chair verifies each finding by replaying it." },
+  ];
+  // A newcomer should meet the cheap number first — and the selected card and
+  // the priced run must never disagree, so steps is derived from the preset,
+  // never set independently of it.
+  const applyPreset = (id) => {
+    const p = PRESETS.find((x) => x.id === id) || PRESETS[0];
+    S.launch.preset = p.id;
+    S.launch.steps = p.steps;
+  };
+  if (!S.launch.preset) applyPreset("quick");
+  else applyPreset(S.launch.preset); // re-entering the tab must not drift either
+
+  async function priceOf(presetId, persona) {
+    const p = PRESETS.find((x) => x.id === presetId);
+    const q = new URLSearchParams({ repo: S.launch.dir, target: S.launch.target });
+    if (p.steps) q.set("steps", String(p.steps));
+    if (persona) q.set("persona", persona);
+    try { return await api("/api/estimate?" + q.toString()); } catch { return null; }
+  }
+
+  async function paintChoices() {
+    if (!S.launch.dir || !S.launch.target) { presets.innerHTML = ""; who.innerHTML = ""; return; }
+    const quoted = await Promise.all(PRESETS.map((p) => priceOf(p.id, S.launch.persona)));
+
+    presets.innerHTML = "";
+    PRESETS.forEach((p, i) => {
+      const q = quoted[i];
+      const card = el("button", "preset" + (S.launch.preset === p.id ? " on" : ""));
+      card.type = "button";
+      card.setAttribute("aria-pressed", String(S.launch.preset === p.id));
+      card.innerHTML = `<div class="nm">${p.name}<span class="cost">${q ? "~$" + q.costUsd.toFixed(2) : "—"}</span></div>
+        <div class="desc">${esc(p.desc)}${q && q.eta ? ` · about ${esc(q.eta.replace("~", ""))}` : ""}</div>`;
+      card.addEventListener("click", () => {
+        applyPreset(p.id);
+        paintChoices();
+        refreshEstimate();
+      });
+      presets.appendChild(card);
+    });
+
+    const all = (quoted.find(Boolean) || {}).allTesters || [];
+    who.innerHTML = "";
+    const mk = (label, persona) => {
+      const b = el("button", S.launch.persona === persona ? "on" : "");
+      b.type = "button";
+      b.textContent = label;
+      b.setAttribute("aria-pressed", String(S.launch.persona === persona));
+      b.addEventListener("click", () => {
+        S.launch.persona = persona;
+        paintChoices();
+        refreshEstimate();
+      });
+      return b;
+    };
+    who.appendChild(mk(`All ${all.length} testers`, null));
+    for (const p of all) who.appendChild(mk(p, p));
+    who.appendChild(el("div", "hint", S.launch.persona
+      ? `Just ${esc(S.launch.persona)} — the cheapest way to see what a run looks like.`
+      : "Each tester looks for different problems, so together they cover more ground."));
+  }
+  const goStatus = el("div", "hint", "");
+  const goRow = el("div", "row");
+  const go = el("button", "btn", "Start the run");
+  go.type = "button";
+  go.disabled = true;
+  goRow.append(go, goStatus);
+  goPanel.appendChild(goRow);
+  wrap.appendChild(goPanel);
+
+  async function refreshEstimate() {
+    const { dir, target, steps } = S.launch;
+    if (!presets.children.length && dir && target) paintChoices();
+    go.disabled = true;
+    if (!dir || !target) {
+      estBox.innerHTML = "";
+      estBox.appendChild(el("div", "empty", "Pick a folder and a running app to see the estimate."));
+      return;
+    }
+    estBox.innerHTML = "";
+    estBox.appendChild(el("div", "empty", "Estimating…"));
+    let est;
+    try {
+      const q = new URLSearchParams({ repo: dir, target });
+      if (steps) q.set("steps", String(steps));
+      if (S.launch.persona) q.set("persona", S.launch.persona);
+      est = await api("/api/estimate?" + q.toString());
+    } catch (e) {
+      estBox.innerHTML = "";
+      estBox.appendChild(el("div", "banner", esc(e.message)));
+      return;
+    }
+    S.launch.estimate = est;
+    estBox.innerHTML = "";
+    const grid = el("div", "estimate");
+    grid.innerHTML = `
+      <div><div class="k">Cost</div><div class="v">~$${est.costUsd.toFixed(2)}</div></div>
+      <div><div class="k">Time</div><div class="v">${est.eta ? esc(est.eta.replace("~", "")) : "unknown"}</div></div>
+      <div><div class="k">LLM calls</div><div class="v">~${est.calls}</div></div>
+      <div><div class="k">Personas</div><div class="v">${est.testers.length}</div></div>
+      <div><div class="k">Model</div><div class="v" style="font-size:13px">${esc(est.model)}</div></div>`;
+    estBox.appendChild(grid);
+    if (!est.eta) estBox.appendChild(el("div", "hint", "No run history yet, so the time estimate is blank — this run will teach it."));
+    if (est.exceedsCostCap) {
+      estBox.appendChild(el("div", "banner", `This estimate is over your <code>max_cost_usd</code> cap of $${est.caps.maxCostUsd.toFixed(2)} — the run will stop early when the cap is hit.`));
+    }
+    go.disabled = false;
+    go.textContent = `Start the run · ~$${est.costUsd.toFixed(2)}`;
+  }
+  refreshEstimate();
+
+  go.addEventListener("click", async () => {
+    const est = S.launch.estimate;
+    if (!est) return;
+    go.disabled = true;
+    goStatus.textContent = "Checking the app is reachable…";
+    try {
+      const { run } = await api("/api/run/start", {
+        target: S.launch.target,
+        repoPath: S.launch.dir,
+        steps: S.launch.steps ?? undefined,
+        persona: S.launch.persona ?? undefined,
+        confirmCostUsd: est.costUsd, // the server refuses to start without this
+      });
+      S.activeRun = run;
+      S.feed = [];
+      render();
+    } catch (e) {
+      goStatus.textContent = e.message;
+      go.disabled = false;
+    }
+  });
+}
+
+// -- Running ----------------------------------------------------------------
+
+function feedRow(e) {
+  const time = String(e.ts || "").slice(11, 19);
+  let cls = "ev", text;
+  if (e.type === "log") { text = e.line; if (e.level === "error") cls += " error"; }
+  else if (e.type === "phase") { cls += " phase"; text = `phase: ${e.phase}`; }
+  else if (e.type === "persona_start") { cls += " persona"; text = `${e.persona} started`; }
+  else if (e.type === "persona_end") { cls += " persona"; text = `${e.persona} finished — ${e.steps ?? "?"} steps, ${e.findings ?? 0} findings`; }
+  else if (e.type === "finding") { cls += " finding"; text = `finding: ${e.title || e.code || ""}`; }
+  else if (e.type === "error") { cls += " error"; text = `error: ${e.error || ""}`; }
+  else if (e.type === "llm_call" || e.type === "eta" || e.type === "run_dir" || e.type === "launch") return null;
+  else text = e.type;
+  const row = el("div", cls);
+  row.innerHTML = `<span class="t">${esc(time)}</span><span>${esc(text || "")}</span>`;
+  return row;
+}
+
+function runningView(wrap) {
+  wrap.appendChild(el("div", "start-hero", `<span class="emoji">🔬</span>
+    <h2>They're in there now</h2>
+    <p>Your crew is clicking through <code>${esc(S.activeRun.target)}</code> in a real browser. Feel free to wander off — the run keeps going without you.</p>`));
+
+  const p = el("div", "panel", "<h2>Live</h2>");
+  const bar = el("div", "progress indet", "<i></i>");
+  const stats = el("div", "estimate");
+  const feed = el("div", "feed");
+  p.append(stats, bar, feed);
+
+  const row = el("div", "row");
+  row.style.marginTop = "12px";
+  const cancel = el("button", "btn danger", "Cancel run");
+  cancel.type = "button";
+  cancel.addEventListener("click", async () => {
+    cancel.disabled = true;
+    try { await api("/api/run/cancel", {}); } catch (e) { row.appendChild(el("span", "hint", esc(e.message))); }
+  });
+  row.appendChild(cancel);
+  p.appendChild(row);
+  wrap.appendChild(p);
+
+  // Derived readouts, recomputed from the events we have rather than tracked
+  // in parallel state — a refresh mid-run replays the backlog and lands here.
+  const paint = () => {
+    let personasTotal = 0, personasDone = 0, cost = 0, findings = 0, phase = "starting up";
+    for (const e of S.feed) {
+      if (e.type === "phase" && e.phase === "start") personasTotal = e.testers || 0;
+      if (e.type === "phase") phase = e.phase === "done" ? "done" : e.phase === "chair" ? "chair: ranking + verifying" : e.phase;
+      if (e.type === "persona_start") phase = `testing as ${e.persona}`;
+      if (e.type === "persona_end") personasDone += 1;
+      if (e.type === "llm_call") cost += e.cost_usd || 0;
+      if (e.type === "finding") findings += 1;
+    }
+    const elapsed = (Date.now() - Date.parse(S.activeRun.startedAt)) / 1000;
+    stats.innerHTML = `
+      <div><div class="k">Phase</div><div class="v" style="font-size:13px">${esc(phase)}</div></div>
+      <div><div class="k">Personas</div><div class="v">${personasDone}${personasTotal ? " / " + personasTotal : ""}</div></div>
+      <div><div class="k">Findings</div><div class="v">${findings}</div></div>
+      <div><div class="k">Spent</div><div class="v">$${cost.toFixed(2)}</div></div>
+      <div><div class="k">Elapsed</div><div class="v">${fmtClock(elapsed)}</div></div>`;
+    if (personasTotal) {
+      bar.classList.remove("indet");
+      bar.querySelector("i").style.width = Math.round((personasDone / personasTotal) * 100) + "%";
+    }
+  };
+
+  const append = (e) => {
+    const row = feedRow(e);
+    if (!row) return;
+    const stuck = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
+    feed.appendChild(row);
+    if (stuck) feed.scrollTop = feed.scrollHeight; // follow unless the user scrolled up
+  };
+
+  for (const e of S.feed) append(e);
+  paint();
+  const ticker = setInterval(paint, 1000);
+
+  attachFeed({
+    onEvent: (e) => { S.feed.push(e); append(e); paint(); },
+    onEnd: (info) => {
+      clearInterval(ticker);
+      cancel.disabled = true;
+      bar.classList.remove("indet");
+      bar.querySelector("i").style.width = "100%";
+      const done = el("div", "banner" + (info.state === "done" ? " info" : ""));
+      done.innerHTML = info.state === "done"
+        ? "Run finished."
+        : info.state === "cancelled"
+          ? "Run cancelled. Any findings recorded before the stop were kept."
+          : `Run failed: ${esc(info.error || "unknown error")}`;
+      if (info.runDir) {
+        const open = el("button", "btn", "Open the report");
+        open.type = "button";
+        open.style.marginLeft = "10px";
+        open.addEventListener("click", async () => {
+          S.activeRun = null;
+          const { runs } = await api("/api/runs");
+          S.runs = runs;
+          const sel = $("#run-select");
+          sel.innerHTML = "";
+          for (const r of runs) sel.appendChild(el("option", "", r.dir + "  —  " + targetLabel(r.target))).value = r.dir;
+          S.takeover = false;
+          applyTakeover();
+          S.tab = "project";
+          await selectRun(info.runDir);
+        });
+        done.appendChild(open);
+      }
+      p.insertBefore(done, stats);
+    },
+  });
+}
+
+/** One EventSource for the page. Reconnects are the browser's job. */
+function attachFeed(handlers) {
+  if (ES) { ES.close(); ES = null; }
+  const since = S.feed.length ? S.feed[S.feed.length - 1].seq : 0;
+  ES = new EventSource("/api/run/events?since=" + since);
+  ES.addEventListener("launch_end", (ev) => {
+    const info = JSON.parse(ev.data);
+    if (S.activeRun) S.activeRun.state = info.state;
+    handlers.onEnd(info);
+    if (ES) { ES.close(); ES = null; }
+  });
+  ES.onmessage = (ev) => { try { handlers.onEvent(JSON.parse(ev.data)); } catch {} };
+  // Named events don't reach onmessage, so every relayed run.log type needs one.
+  for (const t of ["log", "phase", "persona_start", "persona_end", "finding", "error", "llm_call", "eta", "diff", "run_dir", "launch", "mapd", "budget"]) {
+    ES.addEventListener(t, (ev) => { try { handlers.onEvent(JSON.parse(ev.data)); } catch {} });
+  }
+}
+
+/** Hide the tab bar and the run picker while the tool isn't usable yet. */
+function applyTakeover() {
+  const nav = document.querySelector(".tabs");
+  const sel = $("#run-select");
+  if (nav) nav.style.display = S.takeover ? "none" : "";
+  if (sel) sel.style.display = S.takeover ? "none" : "";
+  const fab = $("#chat-fab");
+  if (fab) fab.style.display = S.takeover ? "none" : "";
+}
+
 // ----------------------------------------------------------------- init ---
 function render() {
   const main = $("#main");
   if (main) main.classList.toggle("visual-main", S.tab === "visual");
-  const renderer = ({ project: renderProject, overview: renderOverview, journey: renderJourney, mindmap: renderMindMap, architecture: renderArchitecture, findings: renderFindings, artifacts: renderArtifacts, history: renderHistory, visual: renderVisual })[S.tab] || renderProject;
+  const renderer = ({ start: renderStart, project: renderProject, overview: renderOverview, journey: renderJourney, mindmap: renderMindMap, architecture: renderArchitecture, findings: renderFindings, artifacts: renderArtifacts, history: renderHistory, visual: renderVisual })[S.tab] || renderProject;
   renderer();
 }
 
@@ -4373,14 +5290,45 @@ async function init() {
   );
   const { runs, initialRun } = await api("/api/runs");
   S.runs = runs;
+
+  // Landing state. A first-time user with no key and no runs must not be
+  // dropped onto an empty dashboard — the Start screen takes the page over
+  // until the tool can actually do something, then demotes to a normal tab.
+  await loadSetup();
+  try {
+    const st = await api("/api/run/status");
+    if (st.active) S.activeRun = st.run;
+  } catch { /* older server or transient — the Start screen still works */ }
+  S.takeover = !S.setup.ready || runs.length === 0 || Boolean(S.activeRun);
+  if (S.takeover || !TABS.includes(requestedTab)) {
+    if (S.takeover) S.tab = "start";
+  }
+  applyTakeover();
+  wireWelcome();
+  // First visit in this browser: explain what this thing is before asking for
+  // an API key. Never blocks — it is one dismissal away.
+  if (!seenWelcome()) openWelcome();
+  document.querySelectorAll(".tabs button").forEach((b) => {
+    const active = b.dataset.tab === S.tab;
+    b.classList.toggle("active", active);
+    b.setAttribute("aria-selected", String(active));
+  });
   const sel = $("#run-select");
   for (const r of runs) sel.appendChild(el("option", "", r.dir + "  —  " + targetLabel(r.target) + (r.critical ? ` (${r.critical} critical)` : ""))).value = r.dir;
   sel.addEventListener("change", () => selectRun(sel.value));
-  if (runs.length) {
+  if (runs.length && S.tab !== "start") {
     const fromUrl = new URLSearchParams(location.search).get("run");
     const pick = runs.some((r) => r.dir === fromUrl) ? fromUrl : initialRun || runs[0].dir;
     await selectRun(pick);
-  } else render();
+  } else {
+    if (runs.length) {
+      // Keep the run loaded behind the Start screen so leaving it is instant.
+      const fromUrl = new URLSearchParams(location.search).get("run");
+      const pick = runs.some((r) => r.dir === fromUrl) ? fromUrl : initialRun || runs[0].dir;
+      api("/api/run?dir=" + encodeURIComponent(pick)).then((r) => { S.run = r; $("#run-select").value = pick; }).catch(() => {});
+    }
+    render();
+  }
 
   const setChatOpen = (open) => {
     $("#chat-drawer").classList.toggle("open", open);

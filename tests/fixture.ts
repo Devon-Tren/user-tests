@@ -13,6 +13,8 @@ export function makeDashboardProject(): { root: string; outside: string } {
   mkdirSync(path.join(root, "dashboard"), { recursive: true });
   mkdirSync(path.join(root, "runs", TEST_RUN, "findings"), { recursive: true });
   copyFileSync(path.join(sourceRoot, "dashboard", "index.html"), path.join(root, "dashboard", "index.html"));
+  // The launch panel prices a run from this; without it every estimate 400s.
+  copyFileSync(path.join(sourceRoot, "council.config.yaml"), path.join(root, "council.config.yaml"));
 
   const runDir = path.join(root, "runs", TEST_RUN);
   writeFileSync(path.join(runDir, "REPORT.md"), "# Test report\n\nOne confirmed issue and one goal gap.\n");

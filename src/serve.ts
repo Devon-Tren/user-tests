@@ -16,9 +16,16 @@
  *   GET  /artifact-raw?dir=&file= → one artifact as bytes (view / download)
  *   POST /api/explain         → {dir, code} → grounded explanation (cached per run)
  *   POST /api/chat            → {dir, message, history[], artifacts[]} → RunChat w/ visuals
+ *
+ * Onboarding routes (see guard() below) turn this from a viewer into an
+ * ACTUATOR — it can write .env and launch a run that spends money. Those
+ * routes are gated on a per-process token, a same-origin check, and a JSON
+ * content-type requirement; the read-only routes above stay open so nothing
+ * that worked before needs a token.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createReadStream, existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { callLLM } from "./llm.js";
@@ -26,12 +33,23 @@ import { RunLogger } from "./logger.js";
 import { RunChat, type ChatTurn } from "./chat.js";
 import { ARTIFACT_MIME, artifactIndex, readArtifact, resolveArtifact } from "./artifacts.js";
 import { fetchMapdGraph, fetchMapdGaps } from "./coverage.js";
+import { loadConfig } from "./config.js";
+import { estimateRun } from "./estimate.js";
+import { probeLocalServersDetailed } from "./probe.js";
+import { applyCredentials, readiness } from "./setup.js";
+import { defaultBrowseRoot, listDirs } from "./browse.js";
+import { RunSupervisor } from "./launch.js";
+import { nativePickerAvailable, pickFolder, PickCancelled } from "./pick.js";
 
 export interface ServeOptions {
   projectRoot: string;
   initialRun?: string | null;
   port: number;
   log: (msg: string) => void;
+  /** Shared secret for the mutating routes. Generated per process when omitted. */
+  token?: string;
+  /** Root the folder browser may not escape. Defaults to the user's home directory. */
+  browseRoot?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -53,6 +71,78 @@ const json = (res: ServerResponse, status: number, body: unknown): void => {
 class HttpError extends Error {
   constructor(readonly status: number, message: string) {
     super(message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Guards for the mutating routes
+//
+// The threat is not a remote attacker — the server is bound to 127.0.0.1. It
+// is (a) any other local process, and (b) a page you happen to be visiting
+// that POSTs to localhost in the background. Three overlapping checks:
+//
+//   1. token       — a local process would have to read the served HTML to get it
+//   2. same-origin — a foreign page's Origin header gives it away
+//   3. JSON type   — forces a CORS preflight, which check 2 then fails
+//
+// Any one of these is defeatable in isolation; together they are not.
+// ---------------------------------------------------------------------------
+
+/** Placeholder in dashboard/index.html, substituted per response. */
+const TOKEN_PLACEHOLDER = "__USERTESTS_TOKEN__";
+
+export function mintToken(): string {
+  return randomBytes(24).toString("hex");
+}
+
+/** Constant-time compare that never throws on length mismatch. */
+function tokenMatches(expected: string, received: string | undefined): boolean {
+  if (!received) return false;
+  const a = Buffer.from(expected, "utf8");
+  const b = Buffer.from(received, "utf8");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+/** Only this machine's own dashboard may drive the actuator routes.
+ *  Compared against the request's own Host rather than a configured port, so
+ *  this holds when the server was started on port 0 (tests) or a custom port. */
+function originAllowed(req: IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  if (!origin) return true; // same-origin fetch() and curl send none
+  let host: string;
+  try {
+    const u = new URL(origin);
+    if (u.protocol !== "http:") return false;
+    if (u.hostname !== "localhost" && u.hostname !== "127.0.0.1") return false;
+    host = u.host;
+  } catch {
+    return false; // "null" (sandboxed iframe) and other opaque origins land here
+  }
+  // Same port as the one we are serving on, whatever that turned out to be.
+  const self = req.headers.host;
+  if (!self) return false;
+  return host.split(":")[1] === self.split(":")[1];
+}
+
+/**
+ * Throws unless the request may mutate state. `json` requires a JSON
+ * content-type too — set it false for gated GETs like the folder browser.
+ */
+function guard(req: IncomingMessage, opts: { token: string; json?: boolean }): void {
+  if (!originAllowed(req)) {
+    throw new HttpError(403, "cross-origin requests are not allowed");
+  }
+  if (opts.json !== false) {
+    const type = (req.headers["content-type"] ?? "").split(";")[0]?.trim().toLowerCase();
+    if (type !== "application/json") {
+      throw new HttpError(415, "content-type must be application/json");
+    }
+  }
+  const header = req.headers["x-usertests-token"];
+  const received = Array.isArray(header) ? header[0] : header;
+  if (!tokenMatches(opts.token, received)) {
+    throw new HttpError(401, "missing or invalid x-usertests-token");
   }
 }
 
@@ -702,7 +792,8 @@ async function explainFinding(projectRoot: string, runDir: string, code: string)
 // ---------------------------------------------------------------------------
 
 export function createDashboardServer(opts: ServeOptions): Server {
-  const { projectRoot, port, log } = opts;
+  const { projectRoot, log } = opts;
+  const token = opts.token ?? mintToken();
   const dashboardPath = path.join(projectRoot, "dashboard", "index.html");
   const threeModulePath = fileURLToPath(new URL("../node_modules/three/build/three.module.js", import.meta.url));
   const threeCorePath = fileURLToPath(new URL("../node_modules/three/build/three.core.js", import.meta.url));
@@ -715,6 +806,37 @@ export function createDashboardServer(opts: ServeOptions): Server {
 
   // One chat session per run dir — bound lazily so a serve restart is cheap.
   const chats = new Map<string, RunChat>();
+
+  // At most one live run. A council run drives a real browser and spends real
+  // money; concurrency here would be a footgun, not a feature.
+  const supervisor = new RunSupervisor(projectRoot, log);
+  const browseRoot = opts.browseRoot ?? defaultBrowseRoot();
+
+  // Folders the user chose in the OS dialog. The native picker IS the consent
+  // step — a human physically selected that folder — so these are allowed to
+  // sit outside browseRoot, which nothing else may do.
+  // The onboarding tour. Optional by design: it lives in docs/ rather than in
+  // the npm `files` list, so installs stay small and a missing file simply
+  // means the welcome skips its video slide.
+  const demoVideo = path.join(projectRoot, "docs", "user-tests-walkthrough.mp4");
+  const hasDemo = (): boolean => existsSync(demoVideo);
+
+  const pickedPaths = new Set<string>();
+  const repoAllowed = (p: string): boolean => {
+    if (pickedPaths.has(path.resolve(p))) return true;
+    try {
+      listDirs(browseRoot, p);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  /** Config the CLI would pick for this repo: project-local wins over the package default. */
+  const configFor = (repoPath: string): string => {
+    const local = path.join(repoPath, "council.config.yaml");
+    return existsSync(local) ? local : path.join(projectRoot, "council.config.yaml");
+  };
 
   const server = createServer(async (req, res) => {
     try {
@@ -730,7 +852,9 @@ export function createDashboardServer(opts: ServeOptions): Server {
           "x-frame-options": "DENY",
           "referrer-policy": "no-referrer",
         });
-        res.end(readFileSync(dashboardPath, "utf8"));
+        // The token is handed to the page here rather than via an endpoint:
+        // anything that can read it could already read the page.
+        res.end(readFileSync(dashboardPath, "utf8").split(TOKEN_PLACEHOLDER).join(token));
         return;
       }
 
@@ -887,6 +1011,193 @@ export function createDashboardServer(opts: ServeOptions): Server {
           Array.isArray(body.artifacts) ? body.artifacts.slice(0, 4).map(String) : undefined
         );
         return json(res, 200, { answer, costUsd, pulled });
+      }
+
+      // ---------------------------------------------------------------
+      // Onboarding: readiness, setup, folder browser, launch, live progress.
+      // Everything here is free EXCEPT /api/run/start. Page load must never
+      // spend a token — that is the whole point of currentModel() and of
+      // estimateRun() taking no network path.
+      // ---------------------------------------------------------------
+
+      if (route === "/api/setup" && req.method === "GET") {
+        return json(res, 200, { ...(await readiness(projectRoot)), demoVideo: hasDemo() });
+      }
+
+      // Range-aware so the player can seek; a plain 200 makes the scrubber dead.
+      if (route === "/demo.mp4" && (req.method === "GET" || req.method === "HEAD")) {
+        if (!hasDemo()) return json(res, 404, { error: "no walkthrough video installed" });
+        const total = statSync(demoVideo).size;
+        const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ""));
+        const base = {
+          "content-type": "video/mp4",
+          "accept-ranges": "bytes",
+          "cache-control": "public, max-age=3600",
+          "x-content-type-options": "nosniff",
+        };
+        if (!range) {
+          res.writeHead(200, { ...base, "content-length": String(total) });
+          if (req.method === "HEAD") return res.end();
+          return void createReadStream(demoVideo).pipe(res);
+        }
+        const start = range[1] ? Number(range[1]) : 0;
+        const end = range[2] ? Math.min(Number(range[2]), total - 1) : total - 1;
+        if (!Number.isFinite(start) || start > end || start >= total) {
+          res.writeHead(416, { ...base, "content-range": `bytes */${total}` });
+          return res.end();
+        }
+        res.writeHead(206, {
+          ...base,
+          "content-range": `bytes ${start}-${end}/${total}`,
+          "content-length": String(end - start + 1),
+        });
+        if (req.method === "HEAD") return res.end();
+        return void createReadStream(demoVideo, { start, end }).pipe(res);
+      }
+
+      if (route === "/api/setup" && req.method === "POST") {
+        guard(req, { token });
+        const body = await readJsonBody<{ apiKey?: string; provider?: string; model?: string; baseUrl?: string }>(req);
+        try {
+          applyCredentials(projectRoot, body);
+        } catch (e) {
+          return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+        }
+        // Re-read rather than echo: the response must never carry the key back.
+        log("credentials saved to .env (mode 0600)");
+        return json(res, 200, { ...(await readiness(projectRoot)), demoVideo: hasDemo() });
+      }
+
+      if (route === "/api/fs/list" && req.method === "GET") {
+        // Gated despite being a GET: it discloses the filesystem layout.
+        guard(req, { token, json: false });
+        try {
+          return json(res, 200, {
+            ...listDirs(browseRoot, url.searchParams.get("path"), url.searchParams.get("hidden") === "1"),
+            nativePicker: nativePickerAvailable(),
+          });
+        } catch (e) {
+          return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+
+      if (route === "/api/fs/pick" && req.method === "POST") {
+        guard(req, { token });
+        if (!nativePickerAvailable()) {
+          return json(res, 501, { error: "no native folder dialog on this machine — use the in-page browser" });
+        }
+        try {
+          const picked = await pickFolder("Choose the project you want User-Tests to test");
+          pickedPaths.add(path.resolve(picked));
+          log(`folder chosen in the native dialog: ${picked}`);
+          return json(res, 200, { path: picked, label: picked.replace(process.env["HOME"] ?? "~", "~") });
+        } catch (e) {
+          if (e instanceof PickCancelled) return json(res, 200, { cancelled: true });
+          return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+
+      if (route === "/api/probe" && req.method === "GET") {
+        return json(res, 200, { servers: await probeLocalServersDetailed() });
+      }
+
+      if (route === "/api/estimate" && req.method === "GET") {
+        const repo = url.searchParams.get("repo");
+        const target = url.searchParams.get("target") ?? "http://localhost:0";
+        const stepsRaw = url.searchParams.get("steps");
+        try {
+          const config = loadConfig(configFor(repo ?? projectRoot), {
+            target,
+            repo: repo ?? undefined,
+            steps: stepsRaw ? Number(stepsRaw) : undefined,
+          });
+          // A single-persona run is the cheapest way to try the tool at all,
+          // so the estimate has to be able to price one.
+          const persona = url.searchParams.get("persona");
+          const all = config.council.testers.map((t) => t.persona);
+          if (persona && !all.includes(persona)) {
+            return json(res, 400, { error: `unknown persona "${persona}" (have: ${all.join(", ")})` });
+          }
+          const testers = persona ? 1 : all.length;
+          return json(res, 200, {
+            ...estimateRun(config, testers, runsDir(projectRoot)),
+            testers: persona ? [persona] : all,
+            allTesters: all,
+            stepsPerAgent: config.max_steps_per_agent,
+            defaultSteps: config.max_steps_per_agent,
+          });
+        } catch (e) {
+          return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+
+      if (route === "/api/run/status" && req.method === "GET") {
+        return json(res, 200, { run: supervisor.current(), active: supervisor.active });
+      }
+
+      if (route === "/api/run/start" && req.method === "POST") {
+        guard(req, { token });
+        const body = await readJsonBody<{ target?: string; repoPath?: string; steps?: number; persona?: string; confirmCostUsd?: number }>(req);
+        if (!body.target || !body.repoPath) return json(res, 400, { error: "target and repoPath are required" });
+        if (typeof body.confirmCostUsd !== "number" || !Number.isFinite(body.confirmCostUsd)) {
+          // A run cannot start unless a cost was put in front of a human first.
+          return json(res, 400, { error: "confirmCostUsd is required — the UI must show an estimate before starting a run" });
+        }
+        if (supervisor.active) {
+          return json(res, 409, { error: "a run is already in flight", run: supervisor.current() });
+        }
+        // Either inside the browsable root, or a folder the user picked in the
+        // OS dialog themselves. Anything else is not something a page may aim at.
+        if (!repoAllowed(body.repoPath)) {
+          return json(res, 400, { error: "repoPath is outside the browsable root" });
+        }
+        try {
+          const status = await supervisor.start({
+            target: body.target,
+            repoPath: body.repoPath,
+            steps: body.steps,
+            persona: body.persona,
+          });
+          return json(res, 200, { run: status });
+        } catch (e) {
+          return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+
+      if (route === "/api/run/cancel" && req.method === "POST") {
+        guard(req, { token });
+        try {
+          return json(res, 200, { run: supervisor.cancel() });
+        } catch (e) {
+          return json(res, 409, { error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+
+      if (route === "/api/run/events" && req.method === "GET") {
+        // SSE. EventSource is covered by the existing connect-src 'self' —
+        // no CSP change is needed for the live feed.
+        res.writeHead(200, {
+          "content-type": "text/event-stream; charset=utf-8",
+          "cache-control": "no-store",
+          connection: "keep-alive",
+          "x-content-type-options": "nosniff",
+        });
+        const since = Number(url.searchParams.get("since") ?? req.headers["last-event-id"] ?? 0) || 0;
+        const send = (e: { seq: number; type: string }) => {
+          res.write(`id: ${e.seq}\nevent: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`);
+        };
+        res.write(`event: status\ndata: ${JSON.stringify({ run: supervisor.current(), active: supervisor.active })}\n\n`);
+        for (const e of supervisor.backlog(since)) send(e); // a refresh mid-run re-attaches
+        const unsubscribe = supervisor.subscribe(send);
+        // Proxies and some browsers drop an idle stream; a comment frame is not an event.
+        const keepAlive = setInterval(() => res.write(": keep-alive\n\n"), 15_000);
+        const stop = () => {
+          clearInterval(keepAlive);
+          unsubscribe();
+        };
+        req.on("close", stop);
+        res.on("close", stop);
+        return;
       }
 
       json(res, 404, { error: "not found" });

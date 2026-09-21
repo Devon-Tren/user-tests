@@ -5,6 +5,15 @@ import { chromium } from "playwright";
 import { createDashboardServer } from "../src/serve.js";
 import { makeDashboardProject, TEST_RUN } from "./fixture.js";
 
+// Readiness is read from the environment. These assertions are about a tool
+// that is already set up; the takeover path gets its own test below.
+process.env.USERTESTS_API_KEY = "sk-dashboard-test-key";
+
+/** Mark the one-time explainer as already seen — it opens over everything on a
+ *  fresh browser profile, which is exactly what it is supposed to do. */
+const returningVisitor = (page: import("playwright").Page) =>
+  page.addInitScript(() => localStorage.setItem("usertests.welcome.v2", "1"));
+
 test("dashboard renders accurate integrity metrics and accessible navigation", async (t) => {
   const { root } = makeDashboardProject();
   const server = createDashboardServer({ projectRoot: root, port: 0, log: () => {} });
@@ -15,12 +24,13 @@ test("dashboard renders accurate integrity metrics and accessible navigation", a
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  await returningVisitor(page);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
 
   await page.goto(`http://127.0.0.1:${port}/?run=${TEST_RUN}&tab=overview`, { waitUntil: "networkidle" });
-  assert.equal(await page.locator('[role="tab"]').count(), 9);
+  assert.equal(await page.locator('[role="tab"]').count(), 10);
   assert.equal(await page.locator('[role="tab"][aria-selected="true"]').textContent(), "Overview");
   await assert.doesNotReject(() => page.getByText("Run integrity", { exact: true }).waitFor());
   const overview = await page.locator("main").innerText();
@@ -90,5 +100,195 @@ test("dashboard renders accurate integrity metrics and accessible navigation", a
   await page.setViewportSize({ width: 390, height: 844 });
   const width = await page.locator("body").evaluate((body) => ({ scroll: body.scrollWidth, client: body.clientWidth }));
   assert.equal(width.scroll, width.client);
+  assert.deepEqual(errors, []);
+});
+
+test("a tool that is not set up takes the page over with the Start screen", async (t) => {
+  const { root } = makeDashboardProject();
+  delete process.env.USERTESTS_API_KEY;
+  t.after(() => { process.env.USERTESTS_API_KEY = "sk-dashboard-test-key"; });
+
+  const server = createDashboardServer({ projectRoot: root, port: 0, log: () => {}, token: "tok", browseRoot: root });
+  await new Promise<void>((resolve, reject) => server.listen(0, "127.0.0.1", resolve).once("error", reject));
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const port = (server.address() as AddressInfo).port;
+
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  await returningVisitor(page);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+
+  // Even with an explicit tab in the URL: a dashboard you cannot use yet is
+  // not worth showing, so setup wins.
+  await page.goto(`http://127.0.0.1:${port}/?run=${TEST_RUN}&tab=overview`, { waitUntil: "networkidle" });
+  await page.getByText("Let's get you set up").waitFor();
+  assert.equal(await page.locator(".tabs").isVisible(), false, "the tab bar is hidden until the tool works");
+
+  const main = await page.locator("main").innerText();
+  assert.match(main, /No API key configured/);
+  assert.match(main, /mode 0600/, "the page says where the key goes before asking for it");
+  assert.doesNotMatch(main, /sk-[A-Za-z0-9]{8}/, "no key is ever rendered into the page");
+
+  // The key field must not be a plain-text input.
+  assert.equal(await page.locator("#su-key").getAttribute("type"), "password");
+  await page.getByRole("button", { name: "Save and continue" }).click();
+  await page.getByText("Paste a key first.").waitFor();
+
+  assert.deepEqual(errors, []);
+});
+
+test("a set-up tool with runs shows Start as an ordinary tab", async (t) => {
+  const { root } = makeDashboardProject();
+  process.env.USERTESTS_API_KEY = "sk-dashboard-test-key";
+  const server = createDashboardServer({ projectRoot: root, port: 0, log: () => {}, token: "tok", browseRoot: root });
+  await new Promise<void>((resolve, reject) => server.listen(0, "127.0.0.1", resolve).once("error", reject));
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const port = (server.address() as AddressInfo).port;
+
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  await returningVisitor(page);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+
+  await page.goto(`http://127.0.0.1:${port}/?run=${TEST_RUN}&tab=start`, { waitUntil: "networkidle" });
+  assert.equal(await page.locator(".tabs").isVisible(), true);
+  await page.getByText("New run", { exact: true }).waitFor();
+
+  // The OS dialog leads; the in-page browser is the fallback and starts hidden,
+  // so a returning user is not staring at a directory tree they did not ask for.
+  await page.getByRole("button", { name: /Choose a folder/ }).waitFor();
+  assert.equal(await page.locator(".dirlist").isVisible(), false);
+
+  await page.getByRole("button", { name: "Browse here instead" }).click();
+  await page.locator(".dirlist .dir").first().waitFor();
+  const dirs = await page.locator(".dirlist .dir").allInnerTexts();
+  assert.ok(dirs.some((d) => d.includes("runs")));
+  assert.ok(!dirs.some((d) => d.includes("REPORT.md")), "files are never listed");
+
+  // No repo and no target yet, so there is nothing to start.
+  const start = page.locator("#main button.btn").filter({ hasText: "Start the run" });
+  assert.equal(await start.isDisabled(), true, "you cannot start a run before a cost is shown");
+  assert.match(await page.locator("main").innerText(), /Pick a folder and a running app/);
+
+  assert.deepEqual(errors, []);
+});
+
+test("a first-time visitor gets the explainer once, and can replay it", async (t) => {
+  const { root } = makeDashboardProject();
+  process.env.USERTESTS_API_KEY = "sk-dashboard-test-key";
+  const server = createDashboardServer({ projectRoot: root, port: 0, log: () => {}, token: "tok", browseRoot: root });
+  await new Promise<void>((resolve, reject) => server.listen(0, "127.0.0.1", resolve).once("error", reject));
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const port = (server.address() as AddressInfo).port;
+
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+
+  // No flag set: this is somebody's first ever visit.
+  await page.goto(`http://127.0.0.1:${port}/?tab=start`, { waitUntil: "networkidle" });
+  const dialog = page.locator("#welcome");
+  // The fixture ships no walkthrough, so the deck starts on the written slides.
+  await dialog.getByText("Four testers, one report").waitFor();
+  assert.equal(await dialog.locator("video").count(), 0, "no video slide without a video");
+  assert.equal(await dialog.getAttribute("aria-hidden"), "false");
+  assert.equal(await dialog.getAttribute("aria-modal"), "true");
+
+  // It explains the crew, the chair, and — the part people most need up front —
+  // that this costs money and needs their app running.
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await dialog.getByText("Chaos hunter").waitFor();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await dialog.getByText("Dedupes").waitFor();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  const caveats = await dialog.innerText();
+  assert.match(caveats, /has to be running/);
+  assert.match(caveats, /spends real money/);
+  assert.match(caveats, /\$0\.50/);
+
+  await page.getByRole("button", { name: "Let's go", exact: true }).click();
+  assert.equal(await dialog.getAttribute("aria-hidden"), "true");
+  assert.equal(await page.evaluate(() => localStorage.getItem("usertests.welcome.v2")), "1");
+
+  // Second visit: it stays out of the way.
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByText("New run", { exact: true }).waitFor();
+  assert.equal(await dialog.getAttribute("aria-hidden"), "true");
+
+  // ...but it is still reachable, and Esc closes it.
+  await page.getByRole("button", { name: /How does this work/ }).click();
+  await dialog.getByText("Four testers, one report").waitFor();
+  await page.keyboard.press("Escape");
+  assert.equal(await dialog.getAttribute("aria-hidden"), "true");
+
+  assert.deepEqual(errors, []);
+});
+
+test("the selected depth preset is the one the Start button prices", async (t) => {
+  const { root } = makeDashboardProject();
+  process.env.USERTESTS_API_KEY = "sk-dashboard-test-key";
+  const server = createDashboardServer({ projectRoot: root, port: 0, log: () => {}, token: "tok", browseRoot: root });
+  await new Promise<void>((resolve, reject) => server.listen(0, "127.0.0.1", resolve).once("error", reject));
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const port = (server.address() as AddressInfo).port;
+
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1280, height: 1150 } });
+  await returningVisitor(page);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+
+  await page.goto(`http://127.0.0.1:${port}/?tab=start`, { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "Browse here instead" }).click();
+  await page.locator(".dirlist .dir").first().waitFor();
+  await page.getByRole("button", { name: "Use this folder" }).click();
+  // No dev server is required to price a run — the estimate never touches the network.
+  await page.locator("#lp-target").fill("http://127.0.0.1:9");
+  await page.locator("#lp-target").dispatchEvent("change");
+  await page.locator(".preset").first().waitFor();
+  await page.waitForTimeout(1200);
+
+  const quoted = (card: string) => page.locator(card).locator(".cost").innerText();
+  const startLabel = () => page.locator("#main button.btn").filter({ hasText: "Start the run" }).innerText();
+  const priceIn = (s: string) => Number(/\$([\d.]+)/.exec(s)?.[1] ?? NaN);
+
+  // The cheap option is preselected — a first-timer must not meet the big number.
+  assert.match(await page.locator(".preset.on .nm").innerText(), /Quick pass/);
+
+  // Guard the guard: assert.equal is Object.is, so NaN === NaN would let a
+  // completely broken estimate pass this test silently. It did exactly that once.
+  assert.ok(Number.isFinite(priceIn(await startLabel())), "the Start button must show a real price");
+  assert.ok(Number.isFinite(priceIn(await quoted(".preset.on"))), "the preset card must show a real price");
+
+  // THE bug this guards: the highlighted card and the button once disagreed,
+  // so the price shown was not the price that would have been spent.
+  assert.equal(priceIn(await startLabel()), priceIn(await quoted(".preset.on")),
+    "the Start button must quote the selected preset");
+
+  const quick = priceIn(await startLabel());
+  await page.locator(".preset").nth(1).click();
+  await page.waitForTimeout(1200);
+  const full = priceIn(await startLabel());
+  assert.ok(full > quick, `a full run must cost more than a quick pass (${full} vs ${quick})`);
+  assert.equal(full, priceIn(await quoted(".preset.on")), "still in agreement after switching");
+
+  // One tester is cheaper than four, and that is the whole point of the picker.
+  const testers = await page.locator(".who button").count();
+  assert.ok(testers >= 2, "a persona picker with at least 'all' plus one tester");
+  await page.locator(".who button").nth(1).click();
+  await page.waitForTimeout(1200);
+  assert.ok(priceIn(await startLabel()) < full, "a single persona must cost less than the whole council");
+
   assert.deepEqual(errors, []);
 });
