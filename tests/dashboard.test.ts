@@ -30,7 +30,8 @@ test("dashboard renders accurate integrity metrics and accessible navigation", a
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
 
   await page.goto(`http://127.0.0.1:${port}/?run=${TEST_RUN}&tab=overview`, { waitUntil: "networkidle" });
-  assert.equal(await page.locator('[role="tab"]').count(), 10);
+  // Four graph views used to be four top-level tabs; they live behind Explore now.
+  assert.equal(await page.locator('[role="tab"]').count(), 7);
   assert.equal(await page.locator('[role="tab"][aria-selected="true"]').textContent(), "Overview");
   await assert.doesNotReject(() => page.getByText("Run integrity", { exact: true }).waitFor());
   const overview = await page.locator("main").innerText();
@@ -42,25 +43,36 @@ test("dashboard renders accurate integrity metrics and accessible navigation", a
 
   const expectedText: Record<string, RegExp> = {
     Project: /A deterministic dashboard fixture/,
-    Journey: /Where the testers went/,
-    "Mind Map": /Project mind map/,
-    Architecture: /Graph metrics/,
     Findings: /Save action crashes/,
     Artifacts: /Run folder/,
-    Visual: /Your codebase, drawn in 3D/,
   };
   for (const [tab, text] of Object.entries(expectedText)) {
     await page.getByRole("tab", { name: tab, exact: true }).click();
     await assert.doesNotReject(() => page.locator("main").getByText(text).first().waitFor());
   }
 
-  await page.getByRole("tab", { name: "Architecture", exact: true }).click();
+  // The four views are now reached through Explore's switcher, and each is
+  // named for what it shows rather than for its data structure.
+  await page.getByRole("tab", { name: "Explore", exact: true }).click();
+  assert.equal(await page.locator(".explore-pick").count(), 4);
+  const views: [RegExp, RegExp][] = [
+    [/Where they went/, /Where the testers went/],
+    [/What they found/, /Project mind map/],
+    [/How your code fits together/, /Graph metrics/],
+    [/Your codebase in 3D/, /Your codebase, drawn in 3D/],
+  ];
+  for (const [pick, text] of views) {
+    await page.locator(".explore-pick").filter({ hasText: pick }).click();
+    await assert.doesNotReject(() => page.locator("main").getByText(text).first().waitFor());
+  }
+
+  await page.locator(".explore-pick").filter({ hasText: /How your code fits together/ }).click();
   await assert.doesNotReject(() => page.getByText("Modules mapped", { exact: true }).waitFor());
   assert.equal(await page.locator(".arch-node").count(), 2);
   await page.locator(".arch-node").first().click();
   assert.match(await page.locator("main").innerText(), /upstream in amber, downstream in green/);
 
-  await page.getByRole("tab", { name: "Visual", exact: true }).click();
+  await page.locator(".explore-pick").filter({ hasText: /Your codebase in 3D/ }).click();
   await assert.doesNotReject(() => page.getByText("Your codebase, drawn in 3D.", { exact: true }).waitFor());
   await page.locator('#visual-canvas[data-renderer="webgl"]').waitFor();
   assert.equal(await page.locator("#visual-canvas").getAttribute("data-semantic-geometry"), "true");
@@ -87,8 +99,17 @@ test("dashboard renders accurate integrity metrics and accessible navigation", a
   await page.locator("#visual-canvas").focus();
   await page.keyboard.press("Home");
 
+
+  // Anyone holding an old ?tab=architecture link must still land on it.
+  await page.goto(`http://127.0.0.1:${port}/?run=${TEST_RUN}&tab=architecture`, { waitUntil: "domcontentloaded" });
+  await page.locator(".explore-pick.on").waitFor();
+  assert.match(await page.locator(".explore-pick.on").innerText(), /How your code fits together/);
+  assert.equal(await page.locator('[role="tab"][aria-selected="true"]').textContent(), "Explore");
+  assert.match(page.url(), /view=architecture/, "the view is reflected in the URL so it can be shared");
+
   await page.getByRole("tab", { name: "History" }).click();
   assert.match(page.url(), /tab=history/);
+  assert.equal(await page.locator("#explore-bar-host").isVisible(), false, "the switcher belongs to Explore only");
   assert.match(await page.locator("main").innerText(), /2 \/ 5/);
 
   await page.locator("#chat-fab").click();

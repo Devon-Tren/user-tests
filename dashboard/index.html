@@ -57,6 +57,7 @@ select:focus{border-color:var(--accent);box-shadow:var(--glow-a)}
 .tabs button.active{background:linear-gradient(135deg, rgba(var(--c-accent),.25), rgba(var(--c-accent2),.22));color:var(--text);box-shadow:inset 0 1px 0 rgba(var(--c-white),.08), 0 4px 14px rgba(80,120,255,.25)}
 .tabs button:not(.active):hover{color:var(--text);transform:translateY(-1px)}
 main{padding:22px;max-width:1320px;margin:0 auto;animation:pageIn .45s cubic-bezier(.2,.8,.3,1)}
+#explore-bar-host + main{padding-top:6px}
 @media(max-width:560px){header{padding:11px 18px;gap:10px}header h1{width:100%}select{max-width:100%;width:100%}main{padding:18px}.hero-panel{padding:22px 26px}.hero-title{font-size:29px}.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @keyframes pageIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 .panel{background:var(--panel);border:1px solid var(--border);border-radius:var(--r-lg);padding:18px;margin-bottom:18px;
@@ -112,6 +113,22 @@ button.btn:disabled{opacity:.55;cursor:default;transform:none}
 .explain .md code{background:var(--panel2);padding:1px 6px;border-radius:var(--r-xs);font-size:12px}
 .explain .md pre{background:var(--panel2);padding:10px;border-radius:var(--r-sm);overflow-x:auto}
 .explain .md ul,.explain .md ol{margin:7px 0;padding-left:20px}
+/* explore: one tab, four views */
+/* Match main's gutter exactly so the switcher lines up with the panels. */
+#explore-bar-host{padding:22px 22px 0;max-width:1320px;margin:0 auto}
+#explore-bar-host.wide{max-width:1760px}
+@media(max-width:560px){#explore-bar-host{padding:18px 18px 0}}
+#explore-bar-host[hidden]{display:none}
+.explore-bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.explore-pick{display:inline-flex;align-items:center;gap:8px;background:rgba(var(--c-bg),.5);
+  border:1px solid var(--border);border-radius:var(--r-pill);padding:9px 16px;color:var(--muted);
+  font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;
+  transition:color .2s, border-color .2s, background .2s, transform .22s cubic-bezier(.2,1.1,.35,1)}
+.explore-pick:hover{color:var(--text);border-color:var(--border-hi);transform:translateY(-1px)}
+.explore-pick.on{color:var(--text);border-color:var(--accent);background:rgba(var(--c-accent),.14);
+  box-shadow:0 0 0 1px var(--accent)}
+.explore-pick .e{font-size:15px}
+.explore-blurb{color:var(--muted);font-size:13px;margin:0 0 16px;max-width:760px;line-height:1.6}
 /* welcome: the one-time "what is this?" walkthrough */
 #welcome{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;padding:20px;
   background:rgba(4,7,14,.82);backdrop-filter:blur(14px) saturate(1.2)}
@@ -608,15 +625,13 @@ a.art-link:hover{color:var(--text);border-bottom-style:solid}
     <button type="button" role="tab" aria-selected="false" data-tab="start">Start</button>
     <button type="button" role="tab" aria-selected="true" data-tab="project" class="active">Project</button>
     <button type="button" role="tab" aria-selected="false" data-tab="overview">Overview</button>
-    <button type="button" role="tab" aria-selected="false" data-tab="journey">Journey</button>
-    <button type="button" role="tab" aria-selected="false" data-tab="mindmap">Mind Map</button>
-    <button type="button" role="tab" aria-selected="false" data-tab="architecture">Architecture</button>
+    <button type="button" role="tab" aria-selected="false" data-tab="explore">Explore</button>
     <button type="button" role="tab" aria-selected="false" data-tab="findings">Findings</button>
     <button type="button" role="tab" aria-selected="false" data-tab="artifacts">Artifacts</button>
     <button type="button" role="tab" aria-selected="false" data-tab="history">History</button>
-    <button type="button" role="tab" aria-selected="false" data-tab="visual">Visual</button>
   </nav>
 </header>
+<div id="explore-bar-host" hidden></div>
 <main id="main" tabindex="-1" aria-live="polite"></main>
 
 <div id="welcome" role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-hidden="true">
@@ -637,14 +652,26 @@ a.art-link:hover{color:var(--text);border-bottom-style:solid}
 <script>
 "use strict";
 // ---------------------------------------------------------------- state ---
-const TABS = ["start", "project", "overview", "journey", "mindmap", "architecture", "findings", "artifacts", "history", "visual"];
+const TABS = ["start", "project", "overview", "explore", "findings", "artifacts", "history"];
+/** The four graph views used to be four top-level tabs. A newcomer could not
+ *  tell which of them to open, so they live behind one Explore tab now. The
+ *  old names still work as deep links and from in-page navigation. */
+const EXPLORE_VIEWS = ["journey", "mindmap", "architecture", "visual"];
 // Substituted per-response by the "/" route in serve.ts. Every mutating call
 // carries it, so a stray local process cannot drive the launcher.
 const TOKEN = "__USERTESTS_TOKEN__";
-const requestedTab = new URLSearchParams(location.search).get("tab");
+const urlQ = new URLSearchParams(location.search);
+let requestedTab = urlQ.get("tab");
+let requestedView = urlQ.get("view");
+// ?tab=architecture still means something to anyone holding an old link.
+if (EXPLORE_VIEWS.includes(requestedTab)) { requestedView = requestedTab; requestedTab = "explore"; }
 const S = { runs: [], run: null, tab: TABS.includes(requestedTab) ? requestedTab : "project", chatHistory: [], chatCost: 0, lastArch: null, lastFinding: null, ctxNote: null, pins: [], artifacts: [],
   // start-screen state
-  setup: null, launch: { dir: null, target: null, steps: null, servers: null, estimate: null, busy: false }, activeRun: null, feed: [], takeover: false };
+  setup: null, launch: { dir: null, target: null, steps: null, servers: null, estimate: null, busy: false }, activeRun: null, feed: [], takeover: false,
+  exploreView: EXPLORE_VIEWS.includes(requestedView) ? requestedView : "journey" };
+
+/** What is actually on screen — Explore stands in for four different views. */
+const curView = () => (S.tab === "explore" ? S.exploreView : S.tab);
 const $ = (sel) => document.querySelector(sel);
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -1268,14 +1295,14 @@ function currentViewContext() {
   for (const f of r.findings || []) if (f.section === "main" && sev[f.severity] != null) sev[f.severity]++;
   let ctx = `Dashboard tab: "${S.tab}". Run ${r.dir} targeting ${r.target}. ${(r.findings || []).length} findings (${sev.critical} critical / ${sev.major} major / ${sev.minor} minor). ${r.personas.length} personas, ${(r.stats && r.stats.llmCalls) || "?"} LLM calls.`;
   const a = S.lastArch;
-  if (S.tab === "architecture" && a && a.stats) {
+  if (curView() === "architecture" && a && a.stats) {
     ctx += ` Architecture graph on screen: ${a.stats.shown} files, ${(a.workflows || []).length} workflows, ${a.stats.totalLoc} LOC.`;
   }
-  if (S.tab === "visual" && a && a.stats) {
+  if (curView() === "visual" && a && a.stats) {
     ctx += ` Interactive 3D repository blueprint on screen: ${a.stats.shown} files, ${(a.workflows || []).length} workflows, ${a.stats.totalLoc} LOC.`;
   }
-  if (S.tab === "mindmap") ctx += " Mind map on screen: screens → interactions → pinned findings, plus code surfaces.";
-  if (S.tab === "journey") ctx += " Journey on screen: page-flow graph with per-persona step timelines.";
+  if (curView() === "mindmap") ctx += " Mind map on screen: screens → interactions → pinned findings, plus code surfaces.";
+  if (curView() === "journey") ctx += " Journey on screen: page-flow graph with per-persona step timelines.";
   if (S.tab === "history") ctx += ` History on screen: table of ${S.runs.length} runs.`;
   if (S.lastFinding) ctx += ` Last viewed finding: ${S.lastFinding.code || "?"} — ${S.lastFinding.title} (${S.lastFinding.severity}).`;
   return ctx;
@@ -1723,7 +1750,22 @@ function renderJourney() {
 
 const WF_PALETTE = ["#6ea8ff", "#9a6eff", "#3fd68f", "#ffa14d", "#ff5d73", "#c99aff", "#4dd0e1", "#ffd166"];
 
+/** Keep the address bar describing what is on screen, view included. */
+function syncUrl(dir) {
+  const params = new URLSearchParams(location.search);
+  if (dir || (S.run && S.run.dir)) params.set("run", dir || S.run.dir);
+  params.set("tab", S.tab);
+  if (S.tab === "explore") params.set("view", S.exploreView); else params.delete("view");
+  history.replaceState(null, "", `${location.pathname}?${params.toString()}`);
+}
+
 function goTab(name) {
+  // Callers all over the page still say goTab("architecture") — honour that by
+  // selecting Explore and switching its view, rather than breaking them.
+  if (EXPLORE_VIEWS.includes(name)) {
+    S.exploreView = name;
+    name = "explore";
+  }
   if (!TABS.includes(name)) name = "project";
   if (S.visualCleanup) { S.visualCleanup(); S.visualCleanup = null; }
   S.tab = name;
@@ -1733,12 +1775,11 @@ function goTab(name) {
     x.setAttribute("aria-selected", String(active));
     if (active) x.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
   });
-  const params = new URLSearchParams(location.search);
-  params.set("tab", name);
-  if (S.run) params.set("run", S.run.dir);
-  history.replaceState(null, "", `${location.pathname}?${params.toString()}`);
+  syncUrl();
   const ctxEl = $("#chat-ctx");
-  if (ctxEl) ctxEl.textContent = S.run ? `viewing: ${name} · ${targetLabel(S.run.target)} · run ${S.run.dir.slice(0, 19).replace("T", " ")}` : "";
+  // The chat should know which VIEW is up, not just that Explore is open.
+  const label = S.tab === "explore" ? `explore · ${S.exploreView}` : name;
+  if (ctxEl) ctxEl.textContent = S.run ? `viewing: ${label} · ${targetLabel(S.run.target)} · run ${S.run.dir.slice(0, 19).replace("T", " ")}` : "";
   renderSugg();
   render();
 }
@@ -1758,7 +1799,7 @@ function renderSugg() {
   const box = $("#chat-sugg");
   if (!box) return;
   box.innerHTML = "";
-  for (const s of (SUGGESTIONS[S.tab] || SUGGESTIONS.project).slice(0, 3)) {
+  for (const s of (SUGGESTIONS[curView()] || SUGGESTIONS[S.tab] || SUGGESTIONS.project).slice(0, 3)) {
     const c = el("span", "chip", esc(s));
     c.addEventListener("click", () => sendChat(s));
     box.appendChild(c);
@@ -3422,7 +3463,7 @@ async function renderVisual() {
   try {
     arch = await api("/api/architecture?dir=" + encodeURIComponent(r.dir) + (S.archRepo ? "&repo=" + encodeURIComponent(S.archRepo) : ""));
   } catch (e) { err = e.message; }
-  if (!loading.isConnected || S.tab !== "visual") return;
+  if (!loading.isConnected || curView() !== "visual") return;
   main.innerHTML = "";
   if (err || !arch || !arch.nodes || !arch.nodes.length) {
     const p = panelWith("Visual · repository atlas", "the 3D model needs a mapped repository");
@@ -3544,7 +3585,7 @@ async function renderVisual() {
     } catch {
       post = null;
     }
-    if (!consolePanel.isConnected || S.tab !== "visual") return;
+    if (!consolePanel.isConnected || curView() !== "visual") return;
     const started = initVisualWebGL({
       post, lines,
       THREE, arch, model, world, consolePanel, stage, placeholder: canvas, hud, tooltip, inspector, legend,
@@ -5378,11 +5419,75 @@ function applyTakeover() {
   if (fab) fab.style.display = S.takeover ? "none" : "";
 }
 
+// --------------------------------------------------------------- explore ---
+// Four views of "how this thing fits together". They were four top-level tabs,
+// which forced a newcomer to guess which of four to open before knowing what
+// any of them were. Now they are one tab, and each is named for what it shows
+// you rather than for its data structure.
+
+const EXPLORE_META = {
+  journey: {
+    label: "Where they went",
+    icon: "🧭",
+    blurb: "The path each tester actually took through your app, screen by screen — and the exact step where something broke.",
+  },
+  mindmap: {
+    label: "What they found",
+    icon: "🗺️",
+    blurb: "Every screen they reached, what they tried there, and each problem pinned to the place it happened.",
+  },
+  architecture: {
+    label: "How your code fits together",
+    icon: "🏗️",
+    blurb: "Your source as a dependency map: what imports what, which files carry the most risk, and what has no tests.",
+  },
+  visual: {
+    label: "Your codebase in 3D",
+    icon: "🧊",
+    blurb: "The same map drawn as a building — each floor is one step further from your entry point. Drag to orbit.",
+  },
+};
+
+function renderExplore() {
+  if (!EXPLORE_VIEWS.includes(S.exploreView)) S.exploreView = "journey";
+  const meta = EXPLORE_META[S.exploreView];
+  const host = $("#explore-bar-host");
+  host.hidden = false;
+  host.innerHTML = "";
+
+  const bar = el("div", "explore-bar");
+  for (const view of EXPLORE_VIEWS) {
+    const m = EXPLORE_META[view];
+    const b = el("button", "explore-pick" + (view === S.exploreView ? " on" : ""),
+      `<span class="e">${m.icon}</span><span>${esc(m.label)}</span>`);
+    b.type = "button";
+    b.setAttribute("aria-pressed", String(view === S.exploreView));
+    b.addEventListener("click", () => {
+      if (S.exploreView === view) return;
+      S.exploreView = view;
+      syncUrl();
+      render();
+    });
+    bar.appendChild(b);
+  }
+  host.append(bar, el("p", "explore-blurb", esc(meta.blurb)));
+
+  // The four views are untouched — they still own #main and clear it whenever
+  // they like, including after an await. The switcher lives above #main so it
+  // cannot be wiped out from under itself.
+  ({ journey: renderJourney, mindmap: renderMindMap, architecture: renderArchitecture, visual: renderVisual })[S.exploreView]();
+}
+
 // ----------------------------------------------------------------- init ---
 function render() {
   const main = $("#main");
-  if (main) main.classList.toggle("visual-main", S.tab === "visual");
-  const renderer = ({ start: renderStart, project: renderProject, overview: renderOverview, journey: renderJourney, mindmap: renderMindMap, architecture: renderArchitecture, findings: renderFindings, artifacts: renderArtifacts, history: renderHistory, visual: renderVisual })[S.tab] || renderProject;
+  if (main) main.classList.toggle("visual-main", curView() === "visual");
+  const ebh = $("#explore-bar-host");
+  if (ebh) {
+    ebh.classList.toggle("wide", curView() === "visual"); // the 3D view runs wider
+    if (S.tab !== "explore") { ebh.hidden = true; ebh.innerHTML = ""; }
+  }
+  const renderer = ({ start: renderStart, project: renderProject, overview: renderOverview, explore: renderExplore, findings: renderFindings, artifacts: renderArtifacts, history: renderHistory })[S.tab] || renderProject;
   renderer();
 }
 
@@ -5401,10 +5506,7 @@ async function selectRun(dir) {
     if (ctxEl) ctxEl.textContent = `viewing: ${S.tab} · ${targetLabel(S.run.target)} · run ${S.run.dir.slice(0, 19).replace("T", " ")}`;
     renderSugg();
     $("#run-select").value = dir;
-    const params = new URLSearchParams(location.search);
-    params.set("run", dir);
-    params.set("tab", S.tab);
-    history.replaceState(null, "", `${location.pathname}?${params.toString()}`);
+    syncUrl(dir);
     render();
   } catch (e) {
     $("#main").innerHTML = "";
