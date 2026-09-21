@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
@@ -117,6 +117,36 @@ test("onboarding routes are guarded and contained", async (t) => {
 
   assert.deepEqual(await (await fetch(base + "/api/run/status")).json(), { run: null, active: false });
   assert.equal((await post("/api/run/cancel", {})).status, 409, "cancelling with no run in flight is a conflict");
+});
+
+test("three is resolved through node, not by guessing node_modules layout", async (t) => {
+  // A clean `npm install` HOISTS three to the top-level node_modules, so the
+  // old "../node_modules/three/..." path did not exist and `usertests serve`
+  // died at boot with "WebGL runtime not found". Caught only by installing the
+  // real tarball into an empty directory — nothing in a dev checkout shows it.
+  const { root } = makeDashboardProject();
+  const server = createDashboardServer({ projectRoot: root, port: 0, log: () => {} });
+  await new Promise<void>((resolve, reject) => server.listen(0, "127.0.0.1", resolve).once("error", reject));
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+  // The fixture root has no node_modules at all — if resolution were relative
+  // to projectRoot rather than to this module, every one of these would 404.
+  assert.equal(existsSync(path.join(root, "node_modules")), false, "the fixture must not have its own node_modules");
+
+  for (const asset of [
+    "/vendor/three.module.js",
+    "/vendor/three.core.js",
+    "/vendor/addons/postprocessing/EffectComposer.js",
+    "/vendor/addons/postprocessing/UnrealBloomPass.js",
+  ]) {
+    const res = await fetch(base + asset);
+    assert.equal(res.status, 200, `${asset} must be served wherever three was hoisted to`);
+    assert.match(res.headers.get("content-type") ?? "", /text\/javascript/);
+  }
+
+  // Addons still may not escape their root.
+  assert.equal((await fetch(base + "/vendor/addons/../../../etc/passwd")).status, 404);
 });
 
 test("the walkthrough video is optional and seekable", async (t) => {

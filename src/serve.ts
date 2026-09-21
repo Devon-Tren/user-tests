@@ -27,6 +27,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createReadStream, existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { callLLM } from "./llm.js";
 import { RunLogger } from "./logger.js";
@@ -796,9 +797,25 @@ export function createDashboardServer(opts: ServeOptions): Server {
   const { projectRoot, log } = opts;
   const token = opts.token ?? mintToken();
   const dashboardPath = path.join(projectRoot, "dashboard", "index.html");
-  const threeModulePath = fileURLToPath(new URL("../node_modules/three/build/three.module.js", import.meta.url));
-  const threeCorePath = fileURLToPath(new URL("../node_modules/three/build/three.core.js", import.meta.url));
-  const threeAddonsRoot = fileURLToPath(new URL("../node_modules/three/examples/jsm", import.meta.url));
+  // Resolve three through Node, not by guessing the directory layout.
+  // "../node_modules/three/..." only exists in a dev checkout: npm HOISTS
+  // dependencies to the top-level node_modules, so from an installed package
+  // that path is absent and the dashboard refused to boot at all.
+  const req = createRequire(import.meta.url);
+  // three's "exports" map refuses both `three/package.json` and the raw build
+  // files, so neither can be resolved directly. The bare specifier does
+  // resolve — walk up from it to the package root and join from there.
+  const threeRoot = (() => {
+    let dir = path.dirname(req.resolve("three"));
+    for (let up = 0; up < 5; up++) {
+      if (existsSync(path.join(dir, "package.json")) && existsSync(path.join(dir, "build"))) return dir;
+      dir = path.dirname(dir);
+    }
+    throw new Error("could not locate the three package root");
+  })();
+  const threeModulePath = path.join(threeRoot, "build", "three.module.js");
+  const threeCorePath = path.join(threeRoot, "build", "three.core.js");
+  const threeAddonsRoot = path.join(threeRoot, "examples", "jsm");
   const visualModulePath = fileURLToPath(new URL("../dashboard/visual-webgl.js", import.meta.url));
   if (!existsSync(dashboardPath)) throw new Error(`dashboard not found at ${dashboardPath}`);
   if (!existsSync(threeModulePath)) throw new Error(`WebGL runtime not found at ${threeModulePath}`);
