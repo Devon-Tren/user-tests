@@ -24,11 +24,48 @@ publication, in order, with the decisions that need a human marked.
 
 ---
 
-## Step 0 — The one thing that could still surprise you
+## Step 0 — PARTLY DONE (2026-09-22)
 
-**Press Start on a real run.** ~$0.15, ~2 minutes. Everything else in this
-runbook is mechanical; this is the only step that can still teach you
-something.
+**A real council run completed end to end against mitri-v23-2.**
+
+```
+run      runs/2026-09-22T03-29-12.058Z
+target   http://localhost:5191 (mitri, vite dev server)
+estimate ~$0.20 typical / $0.30 ceiling
+ACTUAL   $0.1472 — 18 calls, 14 steps, 4 personas, quick pass
+finding  M-1 "Textbox is unresponsive to typing" (major, replay-confirmed)
+leak     clean — no key anywhere in the run folder
+```
+
+So the spend path is real and verified: spawn -> run.log tailing -> chair ->
+report, plus the calibrated estimate landing 1.36x over actual (it was 3.4x
+before calibration). mitri renders fine in a plain browser (403 chars, 10
+interactive elements, no page errors) but `window.electron` is absent, so that
+finding is probably real-in-browser and not real-in-Electron — worth checking
+before acting on it.
+
+**What is still NOT verified, and needs one human click:**
+
+The run above was started through `POST /api/run/start`, not by clicking the
+button. In headless Chromium a Playwright mouse click on **Start the run**
+produces no click event at all — not even on a `document` capture listener —
+while `element.click()` on the same node fires the handler correctly and other
+buttons on the same page (Re-probe) click fine. Ruled out: the node is topmost
+at its own centre (`elementsFromPoint`), position is stable, it is enabled and
+in the viewport, `force: true` changes nothing, and disabling every
+transform/transition changes nothing.
+
+This is either a headless-harness artifact or a real click-target bug. It
+cannot be settled from a script. **Open the dashboard, fill in a project and a
+target, and click Start.** If the Running view appears, it is a harness
+artifact and Step 0 is fully done. If nothing happens, it is a real bug and it
+blocks launch — the primary path would be dead for every user.
+
+---
+
+## Step 0b — the rest of the live checks
+
+Still worth doing once, whichever way the click goes.
 
 It is the only untested path end to end: spawn → live feed → cancel → report
 handoff. All of it is covered deterministically against a fake CLI, but no real
