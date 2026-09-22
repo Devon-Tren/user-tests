@@ -32,7 +32,13 @@ export interface Check {
 }
 
 export interface Readiness {
+  /** Can the dashboard be used at all? True without an API key — mapping a
+   *  codebase is static analysis and costs nothing. */
   ready: boolean;
+  /** Can the council actually be RUN? Needs a key and a browser. */
+  canRun: boolean;
+  /** Why not, in one line, when canRun is false. */
+  cannotRunReason: string | null;
   provider: string;
   model: string;
   /** Tail of the configured key, or null. The key itself is never returned. */
@@ -64,10 +70,12 @@ function apiKeyCheck(): Check {
     id: "apiKey",
     label: "API key",
     ok: Boolean(key),
-    blocking: true,
+    // NOT blocking: mapping a codebase is static analysis and costs nothing.
+    // A key is only needed to run the council, which is the part that spends.
+    blocking: false,
     detail: key
       ? `${maskKey(key)} — writes to .env, never to run.log`
-      : "No API key configured. Paste one below and it is written to .env (mode 0600).",
+      : "Not set. You can still map any codebase for free — a key is only needed to run the council.",
   };
 }
 
@@ -81,7 +89,7 @@ async function chromiumCheck(): Promise<Check> {
       id: "chromium",
       label: "Chromium",
       ok,
-      blocking: true,
+      blocking: false, // only needed to run the council, not to map a codebase
       detail: ok ? "Installed — the personas drive a real browser." : "Chromium is not downloaded yet (~130 MB, one time).",
       ...(ok ? {} : { fixCommand: "npx playwright install chromium" }),
     };
@@ -90,7 +98,7 @@ async function chromiumCheck(): Promise<Check> {
       id: "chromium",
       label: "Chromium",
       ok: false,
-      blocking: true,
+      blocking: false,
       detail: `Playwright could not resolve a browser: ${e instanceof Error ? e.message : String(e)}`,
       fixCommand: "npx playwright install chromium",
     };
@@ -141,8 +149,17 @@ export async function readiness(projectRoot: string, mapdPath = "mapd"): Promise
     await mapdCheck(mapdPath),
   ];
   const key = process.env.USERTESTS_API_KEY;
+  const failed = (id: string) => !checks.find((c) => c.id === id)?.ok;
+  const cannotRunReason =
+    failed("node") ? "Node 20 or newer is required"
+    : failed("apiKey") ? "an API key is needed to run the council"
+    : failed("chromium") ? "Chromium is not installed"
+    : failed("runs") ? "the run folder is not writable"
+    : null;
   return {
     ready: checks.every((c) => c.ok || !c.blocking),
+    canRun: cannotRunReason === null,
+    cannotRunReason,
     provider,
     model,
     keyHint: key ? maskKey(key) : null,

@@ -128,6 +128,8 @@ button.btn:disabled{opacity:.55;cursor:default;transform:none}
 .explore-pick.on{color:var(--text);border-color:var(--accent);background:rgba(var(--c-accent),.14);
   box-shadow:0 0 0 1px var(--accent)}
 .explore-pick .e{font-size:15px}
+.explore-pick.off{opacity:.4;cursor:not-allowed}
+.explore-pick.off:hover{transform:none;border-color:var(--border);color:var(--muted)}
 .explore-blurb{color:var(--muted);font-size:13px;margin:0 0 16px;max-width:760px;line-height:1.6}
 /* welcome: the one-time "what is this?" walkthrough */
 #welcome{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;padding:20px;
@@ -222,6 +224,17 @@ button.btn:disabled{opacity:.55;cursor:default;transform:none}
 .srv.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent), var(--glow-a)}
 .srv .port{font-weight:700;color:var(--accent)}
 .srv .ttl{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.modes{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:640px){.modes{grid-template-columns:1fr}}
+.mode{background:rgba(var(--c-bg),.45);border:1px solid var(--border);border-radius:var(--r-lg);padding:18px 20px;
+  display:flex;flex-direction:column;gap:10px;align-items:flex-start}
+.mode.free{border-color:rgba(var(--c-ok),.45)}
+.mode .nm{font-size:15px;font-weight:700;display:flex;align-items:center;gap:9px;width:100%}
+.mode .tag{margin-left:auto;font-size:10.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;
+  padding:3px 9px;border-radius:var(--r-pill);border:1px solid var(--border-hi);color:var(--muted)}
+.mode .tag.ok{color:var(--ok);border-color:rgba(var(--c-ok),.55)}
+.mode .desc{color:var(--muted);font-size:12.5px;line-height:1.6}
+.mode .desc b{color:var(--text)}
 .presets{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
 @media (max-width:560px){.presets{grid-template-columns:1fr}}
 .preset{text-align:left;background:rgba(var(--c-bg),.5);border:1px solid var(--border);border-radius:var(--r-lg);padding:15px 17px;
@@ -668,10 +681,20 @@ if (EXPLORE_VIEWS.includes(requestedTab)) { requestedView = requestedTab; reques
 const S = { runs: [], run: null, tab: TABS.includes(requestedTab) ? requestedTab : "project", chatHistory: [], chatCost: 0, lastArch: null, lastFinding: null, ctxNote: null, pins: [], artifacts: [],
   // start-screen state
   setup: null, launch: { dir: null, target: null, steps: null, servers: null, estimate: null, busy: false }, activeRun: null, feed: [], takeover: false,
-  exploreView: EXPLORE_VIEWS.includes(requestedView) ? requestedView : "journey" };
+  exploreView: EXPLORE_VIEWS.includes(requestedView) ? requestedView : "journey",
+  freeRepo: null };
 
 /** What is actually on screen — Explore stands in for four different views. */
 const curView = () => (S.tab === "explore" ? S.exploreView : S.tab);
+
+/** FREE mode: a codebase mapped with no run and no API key. Static analysis
+ *  only — it spends nothing. `S.freeRepo` holds the path when there is no run. */
+const archQuery = (extra = "") => {
+  if (S.run) return "?dir=" + encodeURIComponent(S.run.dir) + (S.archRepo ? "&repo=" + encodeURIComponent(S.archRepo) : "") + extra;
+  return "?repo=" + encodeURIComponent(S.archRepo || S.freeRepo) + extra;
+};
+/** Is there anything to explore — a run, or a repo mapped for free? */
+const haveGraph = () => Boolean(S.run || S.freeRepo);
 const $ = (sel) => document.querySelector(sel);
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -1223,7 +1246,7 @@ async function renderMindMap() {
 
   let arch = null, archErr = null;
   try {
-    arch = await api("/api/architecture?dir=" + encodeURIComponent(r.dir) + (S.archRepo ? "&repo=" + encodeURIComponent(S.archRepo) : ""));
+    arch = await api("/api/architecture" + archQuery());
   } catch (e) { archErr = e.message; }
   if (!status.isConnected) return; // user switched tabs while mapd was mapping — don't touch stale DOM
   status.remove();
@@ -2059,7 +2082,7 @@ const ARCH_EXPLAINER =
 async function renderArchitecture() {
   const r = S.run, main = $("#main");
   main.innerHTML = "";
-  if (!r) { main.appendChild(el("div", "empty", "No run selected.")); return; }
+  if (!haveGraph()) { main.appendChild(el("div", "empty", "No run selected.")); return; }
   main.appendChild(el("div", "explainer", ARCH_EXPLAINER));
 
   const loadingPanel = el("div", "panel", "<h2>Architecture</h2>");
@@ -2070,7 +2093,7 @@ async function renderArchitecture() {
   try {
     const fresh = S.archFresh ? "&fresh=1" : "";
     S.archFresh = false;
-    arch = await api("/api/architecture?dir=" + encodeURIComponent(r.dir) + (S.archRepo ? "&repo=" + encodeURIComponent(S.archRepo) : "") + fresh);
+    arch = await api("/api/architecture" + archQuery(fresh));
   } catch (e) { err = e.message; }
   if (!loadingPanel.isConnected) return; // user switched tabs mid-map
   main.innerHTML = "";
@@ -3454,14 +3477,14 @@ async function renderVisual() {
   if (S.visualCleanup) { S.visualCleanup(); S.visualCleanup = null; }
   const r = S.run, main = $("#main");
   main.innerHTML = "";
-  if (!r) { main.appendChild(el("div", "empty", "No run selected.")); return; }
+  if (!haveGraph()) { main.appendChild(el("div", "empty", "No run selected.")); return; }
 
   const loading = el("div", "panel", "<h2>Visual · 3D architecture blueprint</h2>");
   loading.appendChild(el("div", "empty", "Drafting the architecture sheet from the static code map…"));
   main.appendChild(loading);
   let arch = null, err = null;
   try {
-    arch = await api("/api/architecture?dir=" + encodeURIComponent(r.dir) + (S.archRepo ? "&repo=" + encodeURIComponent(S.archRepo) : ""));
+    arch = await api("/api/architecture" + archQuery());
   } catch (e) { err = e.message; }
   if (!loading.isConnected || curView() !== "visual") return;
   main.innerHTML = "";
@@ -4758,7 +4781,9 @@ async function renderStart() {
   }
 
   if (S.activeRun && ["starting", "running"].includes(S.activeRun.state)) return runningView(wrap);
-  if (!S.setup.ready) return setupView(wrap);
+  // The mode picker is the front door whenever the council cannot run yet —
+  // mapping a codebase is free and needs nothing, so never dead-end on a key.
+  if (!S.setup.canRun) return setupView(wrap);
   return launchView(wrap);
 }
 
@@ -4801,12 +4826,70 @@ function howBtn() {
   return b;
 }
 
+/** Two ways in: one free, one that spends. Say which is which, in money. */
+function modePicker(wrap) {
+  const panel = el("div", "panel", "<h2>Two ways to use this</h2>");
+  const grid = el("div", "modes");
+
+  const free = el("div", "mode free");
+  free.innerHTML = `<div class="nm">🗺️ Map a codebase<span class="tag ok">free</span></div>
+    <div class="desc">Static analysis only. See the dependency map, risk hotspots, untested files
+    and the 3D atlas of any project. <b>No API key, no run, costs nothing</b> — it never calls a model.</div>`;
+  const mapBtn = el("button", "btn", "📁 Pick a project to map");
+  mapBtn.type = "button";
+  mapBtn.addEventListener("click", () => pickAndMap(mapBtn));
+  free.appendChild(mapBtn);
+
+  const paid = el("div", "mode paid");
+  const blocked = S.setup && !S.setup.canRun;
+  paid.innerHTML = `<div class="nm">🧪 Run the council<span class="tag">~$0.15–$1</span></div>
+    <div class="desc">Four AI testers drive your running app in a real browser and file what breaks.
+    Needs an API key and your app up. <b>You see the cost and confirm before anything is spent.</b></div>`;
+  const runBtn = el("button", "btn" + (blocked ? " ghost" : ""), blocked ? "Set up a key below ↓" : "Set up a run");
+  runBtn.type = "button";
+  runBtn.disabled = Boolean(blocked);
+  if (!blocked) runBtn.addEventListener("click", () => { S.setup = { ...S.setup, ready: true }; render(); });
+  paid.appendChild(runBtn);
+  if (blocked) paid.appendChild(el("div", "hint", esc(S.setup.cannotRunReason || "")));
+
+  grid.append(free, paid);
+  panel.appendChild(grid);
+  wrap.appendChild(panel);
+}
+
+/** Map a repo with no run and no key — the whole free tier in one action. */
+async function pickAndMap(btn) {
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Finder is open…";
+  try {
+    const r = await api("/api/fs/pick", {});
+    if (r.cancelled) { btn.textContent = label; btn.disabled = false; return; }
+    btn.textContent = "Mapping…";
+    S.freeRepo = r.path;
+    S.archRepo = null;
+    await api("/api/architecture?repo=" + encodeURIComponent(r.path)); // warms the cache
+    S.takeover = false;
+    applyTakeover();
+    S.tab = "explore";
+    S.exploreView = "architecture";
+    syncUrl();
+    render();
+  } catch (e) {
+    btn.textContent = label;
+    btn.disabled = false;
+    const note = el("div", "hint", esc(e.message));
+    btn.parentElement.appendChild(note);
+  }
+}
+
 function setupView(wrap) {
   const hero = el("div", "start-hero", `<span class="emoji">🚀</span>
-    <h2>Let's get you set up</h2>
-    <p>Almost there — just a couple of boxes to tick, then your crew of testers can get to work.</p>`);
+    <h2>Map it free, or put it to the test</h2>
+    <p>Reading your codebase costs nothing. Only running the council spends money — and it always asks first.</p>`);
   hero.appendChild(howBtn());
   wrap.appendChild(hero);
+  modePicker(wrap);
 
   const p = el("div", "panel", "<h2>What's ready</h2>");
   if (S.setup.error) p.appendChild(el("div", "banner", esc(S.setup.error)));
@@ -4814,7 +4897,7 @@ function setupView(wrap) {
   wrap.appendChild(p);
 
   const needsKey = S.setup.checks.some((c) => c.id === "apiKey" && !c.ok);
-  const keyPanel = el("div", "panel", `<h2>${needsKey ? "API key" : "Change your API key"}</h2>`);
+  const keyPanel = el("div", "panel", `<h2>${needsKey ? "API key — only for running the council" : "Change your API key"}</h2>`);
 
   const provField = el("div", "field", `<label for="su-provider">Provider</label>
     <select id="su-provider"><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option></select>`);
@@ -4841,7 +4924,7 @@ function setupView(wrap) {
       keyField.querySelector("input").value = "";
       // Setup just succeeded, so the rest of the dashboard may have become
       // usable — recompute rather than leaving the tab bar hidden.
-      S.takeover = !S.setup.ready || S.runs.length === 0 || Boolean(S.activeRun);
+      S.takeover = !S.setup.ready || (S.runs.length === 0 && !S.freeRepo) || Boolean(S.activeRun);
       applyTakeover();
       render();
     } catch (e) {
@@ -5450,6 +5533,10 @@ const EXPLORE_META = {
 
 function renderExplore() {
   if (!EXPLORE_VIEWS.includes(S.exploreView)) S.exploreView = "journey";
+  // Journey and the mind map are built from a RUN's steps. With only a mapped
+  // codebase there is nothing to draw, so default to the views that work.
+  const runOnly = ["journey", "mindmap"];
+  if (!S.run && runOnly.includes(S.exploreView)) S.exploreView = "architecture";
   const meta = EXPLORE_META[S.exploreView];
   const host = $("#explore-bar-host");
   host.hidden = false;
@@ -5458,9 +5545,14 @@ function renderExplore() {
   const bar = el("div", "explore-bar");
   for (const view of EXPLORE_VIEWS) {
     const m = EXPLORE_META[view];
-    const b = el("button", "explore-pick" + (view === S.exploreView ? " on" : ""),
+    const needsRun = !S.run && runOnly.includes(view);
+    const b = el("button", "explore-pick" + (view === S.exploreView ? " on" : "") + (needsRun ? " off" : ""),
       `<span class="e">${m.icon}</span><span>${esc(m.label)}</span>`);
     b.type = "button";
+    if (needsRun) {
+      b.disabled = true;
+      b.title = "Needs a completed run — this view is built from what the testers did.";
+    }
     b.setAttribute("aria-pressed", String(view === S.exploreView));
     b.addEventListener("click", () => {
       if (S.exploreView === view) return;
@@ -5539,6 +5631,8 @@ async function init() {
     const st = await api("/api/run/status");
     if (st.active) S.activeRun = st.run;
   } catch { /* older server or transient — the Start screen still works */ }
+  // Take the page over only when there is genuinely nothing to look at.
+  // A keyless user with a mappable codebase is NOT stuck — free mode works.
   S.takeover = !S.setup.ready || runs.length === 0 || Boolean(S.activeRun);
   if (S.takeover || !TABS.includes(requestedTab)) {
     if (S.takeover) S.tab = "start";

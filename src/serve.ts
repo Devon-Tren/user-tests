@@ -24,8 +24,8 @@
  * that worked before needs a token.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { randomBytes, timingSafeEqual } from "node:crypto";
-import { createReadStream, existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -449,8 +449,19 @@ interface FullGraph {
   workflows?: ArchWorkflowFull[];
 }
 
-async function architecturePayload(runDir: string, repoOverride: string | null, fresh = false): Promise<Record<string, unknown>> {
-  const log = readLog(runDir);
+/**
+ * @param runDir null in FREE mode — mapping a codebase is static analysis and
+ *   needs neither a run nor an API key. The run folder is only used to recover
+ *   the repo path and to cache the graph; with an explicit repo, neither
+ *   requires a run to have happened.
+ */
+async function architecturePayload(
+  runDir: string | null,
+  repoOverride: string | null,
+  fresh = false,
+  freeCacheDir?: string
+): Promise<Record<string, unknown>> {
+  const log = runDir ? readLog(runDir) : [];
   let repo = repoOverride ?? repoPathFromLog(log);
   if (!repo) {
     throw new Error("this run didn't record its repo (older run) — retry with ?repo=<absolute path>");
@@ -458,7 +469,10 @@ async function architecturePayload(runDir: string, repoOverride: string | null, 
   if (!existsSync(repo)) throw new Error(`repo not found: ${repo}`);
 
   // Cache per run dir — mapd is fast but not free, and the graph doesn't change mid-review.
-  const cachePath = path.join(runDir, "arch.json");
+  // Without a run, cache by repo path so a second visit is instant too.
+  const cachePath = runDir
+    ? path.join(runDir, "arch.json")
+    : path.join(freeCacheDir!, createHash("sha1").update(path.resolve(repo)).digest("hex").slice(0, 16) + ".json");
   if (!fresh && existsSync(cachePath)) {
     try {
       const cached = JSON.parse(readFileSync(cachePath, "utf8")) as { repo?: string; v?: number };
@@ -847,6 +861,9 @@ export function createDashboardServer(opts: ServeOptions): Server {
   process.once("SIGINT", () => { reapDev(); process.exit(0); });
   process.once("SIGTERM", () => { reapDev(); process.exit(0); });
 
+  // Graphs mapped without a run live here, keyed by repo path.
+  const freeCacheDir = path.join(projectRoot, ".cache", "arch");
+
   const pickedPaths = new Set<string>();
   const repoAllowed = (p: string): boolean => {
     if (pickedPaths.has(path.resolve(p))) return true;
@@ -944,12 +961,19 @@ export function createDashboardServer(opts: ServeOptions): Server {
       }
 
       if (route === "/api/architecture" && req.method === "GET") {
-        const runDir = resolveRunDir(projectRoot, url.searchParams.get("dir"));
-        if (!runDir) return json(res, 400, { error: "unknown run dir" });
         const repoOverride = url.searchParams.get("repo");
+        const dirParam = url.searchParams.get("dir");
+        const runDir = resolveRunDir(projectRoot, dirParam);
+        // FREE mode: ?repo= alone, with no run and no API key. Everything here
+        // is mapd static analysis — it costs nothing and spends no tokens.
+        if (!runDir && !repoOverride) return json(res, 400, { error: "unknown run dir" });
+        if (!runDir && repoOverride && !repoAllowed(repoOverride)) {
+          return json(res, 400, { error: "repo is outside the browsable root" });
+        }
         const fresh = url.searchParams.get("fresh") === "1";
         try {
-          return json(res, 200, await architecturePayload(runDir, repoOverride, fresh));
+          if (!runDir) mkdirSync(freeCacheDir, { recursive: true });
+          return json(res, 200, await architecturePayload(runDir, repoOverride, fresh, freeCacheDir));
         } catch (e) {
           return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
         }

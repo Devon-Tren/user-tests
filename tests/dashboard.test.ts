@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { chromium } from "playwright";
+import { mkdirSync, rmSync } from "node:fs";
+import path from "node:path";
 import { createDashboardServer } from "../src/serve.js";
 import { makeDashboardProject, TEST_RUN } from "./fixture.js";
 
@@ -124,7 +126,7 @@ test("dashboard renders accurate integrity metrics and accessible navigation", a
   assert.deepEqual(errors, []);
 });
 
-test("a tool that is not set up takes the page over with the Start screen", async (t) => {
+test("without a key you keep the dashboard, and free mode is the way in", async (t) => {
   const { root } = makeDashboardProject();
   delete process.env.USERTESTS_API_KEY;
   t.after(() => { process.env.USERTESTS_API_KEY = "sk-dashboard-test-key"; });
@@ -142,23 +144,52 @@ test("a tool that is not set up takes the page over with the Start screen", asyn
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
 
-  // Even with an explicit tab in the URL: a dashboard you cannot use yet is
-  // not worth showing, so setup wins.
+  // A missing key used to take the whole page over. It must not: past runs are
+  // readable and mapping a codebase is free, so there is plenty to do here.
   await page.goto(`http://127.0.0.1:${port}/?run=${TEST_RUN}&tab=overview`, { waitUntil: "networkidle" });
-  await page.getByText("Let's get you set up").waitFor();
-  assert.equal(await page.locator(".tabs").isVisible(), false, "the tab bar is hidden until the tool works");
+  await page.getByText("Run integrity", { exact: true }).waitFor();
+  assert.equal(await page.locator(".tabs").isVisible(), true, "a keyless user is not locked out of their own runs");
+
+  // Start offers both paths, and says which one costs money.
+  await page.getByRole("tab", { name: "Start", exact: true }).click();
+  await page.getByText("Map it free, or put it to the test").waitFor();
+  assert.equal(await page.locator(".mode.free button").isDisabled(), false, "free mode never needs a key");
+  assert.match(await page.locator(".mode.free").innerText(), /costs nothing/i);
+  assert.equal(await page.locator(".mode.paid button").isDisabled(), true, "the council needs a key");
+  assert.match(await page.locator(".mode.paid").innerText(), /\$/, "the paid path names a price");
 
   const main = await page.locator("main").innerText();
-  assert.match(main, /No API key configured/);
+  assert.match(main, /an API key is needed to run the council/);
   assert.match(main, /mode 0600/, "the page says where the key goes before asking for it");
   assert.doesNotMatch(main, /sk-[A-Za-z0-9]{8}/, "no key is ever rendered into the page");
-
-  // The key field must not be a plain-text input.
   assert.equal(await page.locator("#su-key").getAttribute("type"), "password");
-  await page.getByRole("button", { name: "Save and continue" }).click();
-  await page.getByText("Paste a key first.").waitFor();
 
   assert.deepEqual(errors, []);
+});
+
+test("with no key AND no runs, the page is taken over by the mode picker", async (t) => {
+  // Nothing to read and nothing set up — the only genuine dead end, and even
+  // here the free path is offered rather than a paywall.
+  const { root } = makeDashboardProject();
+  rmSync(path.join(root, "runs"), { recursive: true, force: true });
+  mkdirSync(path.join(root, "runs"), { recursive: true });
+  delete process.env.USERTESTS_API_KEY;
+  t.after(() => { process.env.USERTESTS_API_KEY = "sk-dashboard-test-key"; });
+
+  const server = createDashboardServer({ projectRoot: root, port: 0, log: () => {}, token: "tok", browseRoot: root });
+  await new Promise<void>((resolve, reject) => server.listen(0, "127.0.0.1", resolve).once("error", reject));
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const port = (server.address() as AddressInfo).port;
+
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  await returningVisitor(page);
+
+  await page.goto(`http://127.0.0.1:${port}/?tab=overview`, { waitUntil: "networkidle" });
+  await page.getByText("Map it free, or put it to the test").waitFor();
+  assert.equal(await page.locator(".tabs").isVisible(), false, "nothing to browse yet, so the tab bar stays hidden");
+  assert.equal(await page.locator(".mode.free button").isDisabled(), false, "the free path is still the way forward");
 });
 
 test("a set-up tool with runs shows Start as an ordinary tab", async (t) => {
