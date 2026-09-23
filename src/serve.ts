@@ -483,8 +483,18 @@ async function architecturePayload(
   }
 
   const graph = (await fetchMapdGraph(repo, { path: "mapd" })) as unknown as FullGraph;
-  const gaps = await fetchMapdGaps(repo, { path: "mapd" }).catch(() => ({}) as { gaps?: { file?: string; status?: string }[] });
-  const testStatus = new Map((gaps.gaps ?? []).map((g) => [g.file, g.status ?? "unknown"]));
+  type GapsShape = {
+    gaps?: { file?: string; status?: string }[];
+    files?: { file?: string; status?: string }[];
+  };
+  const gaps: GapsShape = await fetchMapdGaps(repo, { path: "mapd" }).catch(() => ({}) as GapsShape);
+  // Prefer the full per-file list: it distinguishes "tested" from "not
+  // assessed". Fall back to the gaps-only list for older mapd builds, where
+  // silence genuinely means unknown rather than covered.
+  const testStatus = new Map<string, string>(
+    (gaps.files ?? []).filter((f) => f.file).map((f) => [f.file as string, f.status ?? "unknown"])
+  );
+  for (const g of gaps.gaps ?? []) if (g.file && !testStatus.has(g.file)) testStatus.set(g.file, g.status ?? "unknown");
 
   const allFiles = graph.files ?? [];
   const entryKinds = new Map((graph.entryPoints ?? []).map((e) => [e.file, e.kind ?? "entry"]));
@@ -543,7 +553,11 @@ async function architecturePayload(
         exports: (f.exports ?? []).slice(0, 12).map((e) => (typeof e === "string" ? e : String((e as { name?: string }).name ?? e))),
         entry: entryKinds.get(f.file) ?? null,
         wfs: wfOf.get(f.file) ?? [],
-        test: testStatus.has(f.file) ? testStatus.get(f.file) : "tested-real",
+        // NOT "tested-real". mapd's gap report only lists files it found a gap
+        // in; silence means "not assessed", not "covered". Defaulting to
+        // tested-real turned 2 reported gaps into a claim that 42 of 44 files
+        // had real tests, when 10 of them have no test importing them at all.
+        test: testStatus.get(f.file) ?? "unknown",
       };
     })
     .filter((n) => n !== null);

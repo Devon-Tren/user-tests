@@ -344,3 +344,50 @@ test("the selected depth preset is the one the Start button prices", async (t) =
 
   assert.deepEqual(errors, []);
 });
+
+test("pressing Start survives the blur it causes", async (t) => {
+  // Real bug, found 2026-09-22: clicking Start blurs the target field, which
+  // fires a native change, which re-priced the run — tearing down the estimate
+  // mid-click. The button moved ~55px and went disabled between mousedown and
+  // mouseup, so no click event ever fired and the primary path was dead.
+  const { root } = makeDashboardProject();
+  process.env.USERTESTS_API_KEY = "sk-dashboard-test-key";
+  const server = createDashboardServer({ projectRoot: root, port: 0, log: () => {}, token: "tok", browseRoot: root });
+  await new Promise<void>((resolve, reject) => server.listen(0, "127.0.0.1", resolve).once("error", reject));
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const port = (server.address() as AddressInfo).port;
+
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1280, height: 1600 } });
+  await returningVisitor(page);
+
+  // Never let the run actually start — this asserts the click lands, nothing more.
+  let started = false;
+  await page.route("**/api/run/start", (route) => {
+    started = true;
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ run: { id: "t", state: "running", target: "x", repoPath: "y", startedAt: new Date().toISOString(), runDir: null, exitCode: null, error: null } }) });
+  });
+
+  await page.goto(`http://127.0.0.1:${port}/?tab=start`, { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "Browse here instead" }).click();
+  await page.locator(".dirlist .dir").first().waitFor();
+  await page.getByRole("button", { name: "Use this folder" }).click();
+
+  // Type into the target and go STRAIGHT to Start, with no click in between —
+  // exactly the sequence that used to swallow the click.
+  await page.locator("#lp-target").fill("http://127.0.0.1:9");
+  await page.locator("#lp-target").dispatchEvent("change");
+  const start = page.locator("#main button.btn").filter({ hasText: "Start the run" });
+  await start.waitFor();
+  await page.waitForTimeout(1500);
+
+  const before = await start.evaluate((n) => n.getBoundingClientRect().y);
+  await page.locator("#lp-target").focus();          // put focus back on the field
+  await start.click();
+  await page.waitForTimeout(1200);
+  const after = await start.count() ? await start.evaluate((n) => n.getBoundingClientRect().y) : before;
+
+  assert.equal(started, true, "the click must reach /api/run/start even though it blurs the target field");
+  assert.ok(Math.abs(after - before) < 20, `the button must not jump under the press (${before} -> ${after})`);
+});

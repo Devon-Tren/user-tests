@@ -5293,14 +5293,26 @@ function launchView(wrap) {
   async function refreshEstimate() {
     const { dir, target, steps } = S.launch;
     if (!presets.children.length && dir && target) paintChoices();
-    go.disabled = true;
+    // Pressing Start blurs the target field, which fires a native change and
+    // lands us here mid-click. Tearing the estimate down at that moment moved
+    // the button ~55px and disabled it, so mouseup missed and the click was
+    // swallowed. Keep the last estimate on screen and the button live while
+    // re-pricing: a stale number for 200ms beats a button that cannot be hit.
+    const had = Boolean(S.launch.estimate);
+    if (!had) go.disabled = true;
     if (!dir || !target) {
+      S.launch.estimate = null;
+      go.disabled = true;
       estBox.innerHTML = "";
       estBox.appendChild(el("div", "empty", "Pick a folder and a running app to see the estimate."));
       return;
     }
-    estBox.innerHTML = "";
-    estBox.appendChild(el("div", "empty", "Estimating…"));
+    if (!had) {
+      estBox.innerHTML = "";
+      estBox.appendChild(el("div", "empty", "Estimating…"));
+    } else {
+      estBox.style.opacity = ".55"; // same height, so nothing moves
+    }
     let est;
     try {
       const q = new URLSearchParams({ repo: dir, target });
@@ -5308,11 +5320,15 @@ function launchView(wrap) {
       if (S.launch.persona) q.set("persona", S.launch.persona);
       est = await api("/api/estimate?" + q.toString());
     } catch (e) {
+      estBox.style.opacity = "";
+      S.launch.estimate = null;
+      go.disabled = true;
       estBox.innerHTML = "";
       estBox.appendChild(el("div", "banner", esc(e.message)));
       return;
     }
     S.launch.estimate = est;
+    estBox.style.opacity = "";
     estBox.innerHTML = "";
     const grid = el("div", "estimate");
     const typical = est.typicalUsd ?? est.costUsd;

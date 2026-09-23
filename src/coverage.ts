@@ -51,6 +51,9 @@ interface MapdGap {
 interface MapdGaps {
   summary?: Record<string, unknown>;
   gaps?: MapdGap[];
+  /** Every assessed file with its status — not just the ones with gaps.
+   *  Without this a consumer cannot tell "tested" from "never assessed". */
+  files?: { file?: string; status?: string; inWorkflow?: boolean }[];
 }
 
 const GAP_LABELS: Record<string, string> = {
