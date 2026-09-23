@@ -6,3 +6,4 @@ runs/
 .mapd/
 *.tgz
 coverage/
+.cache/
