@@ -133,8 +133,8 @@ async function mapdCheck(mapdPath: string): Promise<Check> {
       label: "mapd (optional)",
       ok: false,
       blocking: false,
-      detail: "Not on PATH. Runs work fine; the Architecture and Visual tabs will be empty.",
-      fixCommand: "npm install -g mapd",
+      detail: "Not on PATH. Runs and reports work fine, but free mode and the Architecture and Visual tabs need it. Not on npm yet — build it from source.",
+      fixCommand: "git clone https://github.com/Devon-Tren/mapd && cd mapd && npm install && npm link",
     };
   }
 }
