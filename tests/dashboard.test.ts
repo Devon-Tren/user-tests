@@ -391,3 +391,89 @@ test("pressing Start survives the blur it causes", async (t) => {
   assert.equal(started, true, "the click must reach /api/run/start even though it blurs the target field");
   assert.ok(Math.abs(after - before) < 20, `the button must not jump under the press (${before} -> ${after})`);
 });
+
+// The free engine answers from mapd's graph, so testing it through a real map
+// would need mapd installed and a repo to scan. Feed archModel a synthetic
+// payload instead: it is the same object the server returns, and it keeps the
+// assertions about the engine rather than about mapd.
+const FAKE_GRAPH = {
+  v: 1,
+  repo: "/tmp/demo-repo",
+  generatedAt: "2026-09-24T00:00:00.000Z",
+  stats: { fileCount: 5, shown: 5, truncated: false, totalLoc: 700, importResolutionRate: 1, callResolutionRate: 0.9, totalCalls: 40, repoConfidence: 0.8 },
+  workflows: [{ id: "cli.ts", confidence: 0.9, files: 3, fileList: ["src/cli.ts"], entry: "src/cli.ts", functionCount: 4, exportedSurface: ["run"] }],
+  nodes: [
+    { path: "src/cli.ts", name: "cli.ts", dir: "src", loc: 200, lang: "js", fns: [], imports: [], exports: [], entry: "npm-script", wfs: [0], test: "untested" },
+    { path: "src/core.ts", name: "core.ts", dir: "src", loc: 300, lang: "js", fns: [], imports: [], exports: [], entry: null, wfs: [0], test: "untested" },
+    { path: "src/util.ts", name: "util.ts", dir: "src", loc: 80, lang: "js", fns: [], imports: [], exports: [], entry: null, wfs: [], test: "tested-shallow" },
+    { path: "src/deep.ts", name: "deep.ts", dir: "src", loc: 100, lang: "js", fns: [], imports: [], exports: [], entry: null, wfs: [], test: "untested" },
+    { path: "scripts/lonely.js", name: "lonely.js", dir: "scripts", loc: 20, lang: "js", fns: [], imports: [], exports: [], entry: null, wfs: [], test: "unknown" },
+  ],
+  // cli → core → util, and core → deep. lonely.js is attached to nothing.
+  edges: [[0, 1], [1, 2], [1, 3]],
+};
+
+/** Ask the free engine a question against FAKE_GRAPH, in the real page. */
+async function askFree(page: import("playwright").Page, question: string): Promise<string> {
+  return page.evaluate(
+    ([graph, q]) => {
+      const model = (globalThis as never as { archModel: (g: unknown) => unknown }).archModel(graph);
+      const html = (globalThis as never as { freeAnswer: (m: unknown, q: string) => string }).freeAnswer(model, q as string);
+      return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    },
+    [FAKE_GRAPH, question] as const
+  );
+}
+
+test("free mode answers structural questions and refuses behavioural ones", async (t) => {
+  const { root } = makeDashboardProject();
+  const server = createDashboardServer({ projectRoot: root, port: 0, log: () => {}, token: "tok", browseRoot: root });
+  await new Promise<void>((resolve, reject) => server.listen(0, "127.0.0.1", resolve).once("error", reject));
+  t.after(() => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }));
+  const port = (server.address() as AddressInfo).port;
+
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await returningVisitor(page);
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(`http://127.0.0.1:${port}/?tab=explore`, { waitUntil: "domcontentloaded" });
+
+  const overview = await askFree(page, "overview");
+  assert.match(overview, /5 source files/, "counts files from the graph");
+  assert.match(overview, /TypeScript/, "names the language from the extension, not mapd's 'js'");
+
+  const entries = await askFree(page, "entry points");
+  assert.match(entries, /src\/cli\.ts/, "finds the entry point");
+
+  // cli → core → util is two hops; the engine must walk it, not guess.
+  const path2 = await askFree(page, "how does src/cli.ts reach src/util.ts");
+  assert.match(path2, /2 import hops/, "counts the hops");
+  assert.match(path2, /src\/cli\.ts .* src\/core\.ts .* src\/util\.ts/, "walks the real chain");
+
+  // core.ts is imported by cli and imports two files.
+  const impact = await askFree(page, "what breaks if I change src/core.ts");
+  assert.match(impact, /can reach 1 file/, "blast radius is transitive, not total");
+
+  const role = await askFree(page, "what kind of file is src/cli.ts");
+  assert.match(role, /entry point/, "classifies from graph position");
+
+  const orphans = await askFree(page, "orphans");
+  assert.match(orphans, /scripts\/lonely\.js/, "finds the disconnected file");
+
+  // A filename containing an intent keyword must not hijack the routing.
+  const named = await askFree(page, "tell me about src/util.ts");
+  assert.match(named, /src\/util\.ts/, "answers about the file");
+  assert.doesNotMatch(named, /test gap, biggest first/, "does not fall through to the untested list");
+
+  const legend = await askFree(page, "legend");
+  assert.match(legend, /Entry point/, "defines the vocabulary it uses");
+
+  // The whole point: it must not bluff about behaviour.
+  const behaviour = await askFree(page, "does the login button work");
+  assert.match(behaviour, /could not turn that into a question/, "refuses rather than guessing");
+  assert.match(behaviour, /structure/, "says what it can do instead");
+
+  assert.deepEqual(errors, []);
+});
