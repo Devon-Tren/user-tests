@@ -20,7 +20,7 @@ test("dashboard renders accurate integrity metrics and accessible navigation", a
   const { root } = makeDashboardProject();
   const server = createDashboardServer({ projectRoot: root, port: 0, log: () => {} });
   await new Promise<void>((resolve, reject) => server.listen(0, "127.0.0.1", resolve).once("error", reject));
-  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  t.after(() => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }));
   const port = (server.address() as AddressInfo).port;
 
   const browser = await chromium.launch({ headless: true });
@@ -133,7 +133,7 @@ test("without a key you keep the dashboard, and free mode is the way in", async 
 
   const server = createDashboardServer({ projectRoot: root, port: 0, log: () => {}, token: "tok", browseRoot: root });
   await new Promise<void>((resolve, reject) => server.listen(0, "127.0.0.1", resolve).once("error", reject));
-  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  t.after(() => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }));
   const port = (server.address() as AddressInfo).port;
 
   const browser = await chromium.launch({ headless: true });
@@ -178,7 +178,7 @@ test("with no key AND no runs, the page is taken over by the mode picker", async
 
   const server = createDashboardServer({ projectRoot: root, port: 0, log: () => {}, token: "tok", browseRoot: root });
   await new Promise<void>((resolve, reject) => server.listen(0, "127.0.0.1", resolve).once("error", reject));
-  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  t.after(() => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }));
   const port = (server.address() as AddressInfo).port;
 
   const browser = await chromium.launch({ headless: true });
@@ -197,7 +197,7 @@ test("a set-up tool with runs shows Start as an ordinary tab", async (t) => {
   process.env.USERTESTS_API_KEY = "sk-dashboard-test-key";
   const server = createDashboardServer({ projectRoot: root, port: 0, log: () => {}, token: "tok", browseRoot: root });
   await new Promise<void>((resolve, reject) => server.listen(0, "127.0.0.1", resolve).once("error", reject));
-  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  t.after(() => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }));
   const port = (server.address() as AddressInfo).port;
 
   const browser = await chromium.launch({ headless: true });
@@ -208,7 +208,7 @@ test("a set-up tool with runs shows Start as an ordinary tab", async (t) => {
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
 
-  await page.goto(`http://127.0.0.1:${port}/?run=${TEST_RUN}&tab=start`, { waitUntil: "networkidle" });
+  await page.goto(`http://127.0.0.1:${port}/?run=${TEST_RUN}&tab=start`, { waitUntil: "domcontentloaded" });
   assert.equal(await page.locator(".tabs").isVisible(), true);
   await page.getByText("New run", { exact: true }).waitFor();
 
@@ -236,7 +236,7 @@ test("a first-time visitor gets the explainer once, and can replay it", async (t
   process.env.USERTESTS_API_KEY = "sk-dashboard-test-key";
   const server = createDashboardServer({ projectRoot: root, port: 0, log: () => {}, token: "tok", browseRoot: root });
   await new Promise<void>((resolve, reject) => server.listen(0, "127.0.0.1", resolve).once("error", reject));
-  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  t.after(() => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }));
   const port = (server.address() as AddressInfo).port;
 
   const browser = await chromium.launch({ headless: true });
@@ -247,7 +247,7 @@ test("a first-time visitor gets the explainer once, and can replay it", async (t
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
 
   // No flag set: this is somebody's first ever visit.
-  await page.goto(`http://127.0.0.1:${port}/?tab=start`, { waitUntil: "networkidle" });
+  await page.goto(`http://127.0.0.1:${port}/?tab=start`, { waitUntil: "domcontentloaded" });
   const dialog = page.locator("#welcome");
   // The fixture ships no walkthrough, so the deck starts on the written slides.
   await dialog.getByText("Four testers, one report").waitFor();
@@ -272,7 +272,7 @@ test("a first-time visitor gets the explainer once, and can replay it", async (t
   assert.equal(await page.evaluate(() => localStorage.getItem("usertests.welcome.v2")), "1");
 
   // Second visit: it stays out of the way.
-  await page.reload({ waitUntil: "networkidle" });
+  await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByText("New run", { exact: true }).waitFor();
   assert.equal(await dialog.getAttribute("aria-hidden"), "true");
 
@@ -290,7 +290,7 @@ test("the selected depth preset is the one the Start button prices", async (t) =
   process.env.USERTESTS_API_KEY = "sk-dashboard-test-key";
   const server = createDashboardServer({ projectRoot: root, port: 0, log: () => {}, token: "tok", browseRoot: root });
   await new Promise<void>((resolve, reject) => server.listen(0, "127.0.0.1", resolve).once("error", reject));
-  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  t.after(() => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }));
   const port = (server.address() as AddressInfo).port;
 
   const browser = await chromium.launch({ headless: true });
@@ -354,7 +354,7 @@ test("pressing Start survives the blur it causes", async (t) => {
   process.env.USERTESTS_API_KEY = "sk-dashboard-test-key";
   const server = createDashboardServer({ projectRoot: root, port: 0, log: () => {}, token: "tok", browseRoot: root });
   await new Promise<void>((resolve, reject) => server.listen(0, "127.0.0.1", resolve).once("error", reject));
-  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  t.after(() => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }));
   const port = (server.address() as AddressInfo).port;
 
   const browser = await chromium.launch({ headless: true });
