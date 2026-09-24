@@ -15,9 +15,13 @@ about **$0.50–$1.25**, depending on the model, retries, and app complexity.
 
 ## Install
 
-You need **Node ≥ 20**, an **app running on localhost**, and an **API key** for
-Anthropic or OpenAI. Chromium is installed below. `mapd` is
-optional — it unlocks coverage-guided personas and the Architecture tab.
+To **run the council** you need **Node ≥ 20**, an **app running on localhost**,
+and an **API key** for Anthropic or OpenAI. Chromium is installed below.
+
+To **map a codebase** you need none of those — only `mapd` on your PATH. That
+mode reads your source and answers questions about it for free, offline, without
+ever calling a model. See [Free mode](#free-mode--no-key-no-run). `mapd` also
+adds coverage-guided personas and the Architecture tab to paid runs.
 
 ```bash
 git clone https://github.com/Devon-Tren/user-tests.git && cd user-tests
@@ -245,6 +249,35 @@ filterable event stream, screenshots inline — with open-raw, download and
 copy-id on each. Artifact references inside the report (`shots/C-1.png`) are
 clickable everywhere they appear, and every other tab shows which files it was
 rendered from.
+
+### Free mode — no key, no run
+
+Mapping a codebase costs nothing and needs no API key, no running app and no
+run — it is `mapd` static analysis end to end. Choose **🗺️ Map a codebase** on the
+front door and any project on your disk opens in the Architecture graph, the
+Mind Map's code surfaces and the 3D Visual blueprint.
+
+The chat drawer works there too, and answers from the map instead of a model.
+No tokens, no network, instant once the repo is mapped:
+
+| Ask | You get |
+|---|---|
+| `overview` | files, lines, languages, entry points, workflows, coverage, cycles |
+| `entry points` | where execution starts, and how much of the repo each one reaches |
+| `what's untested` | files no test imports, largest first, with dependent counts |
+| `where should I start` | structural risk — size, how much depends on it, whether tests reach it |
+| `workflows` | the feature-like file chains mapd inferred |
+| `biggest files` · `orphans` · `cycles` | size outliers, disconnected files, import loops |
+| `what depends on src/chat.ts` | direct importers, plus the transitive count |
+| `what does src/serve.ts import` | the same question the other way round |
+| `tell me about src/cli.ts` | size, functions, imports, test status, risk score |
+
+Every number is computed from the model the Architecture and Visual tabs draw,
+so the answers and the pictures never disagree.
+
+It will not pretend to know more than the map holds. Ask whether a button works
+and it tells you plainly: static analysis describes **structure**, not
+behaviour, and only a run finds defects.
 
 ### The analyst pulls artifacts on demand
 
