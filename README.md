@@ -271,9 +271,18 @@ No tokens, no network, instant once the repo is mapped:
 | `what depends on src/chat.ts` | direct importers, plus the transitive count |
 | `what does src/serve.ts import` | the same question the other way round |
 | `tell me about src/cli.ts` | size, functions, imports, test status, risk score |
+| `explain the architecture` | the layers, from entry points down, and what is unreachable |
+| `what breaks if I change src/llm.ts` | everything the change can reach, and how much of it is untested |
+| `how does src/cli.ts reach src/chat.ts` | the import path between two files, hop by hop |
+| `what kind of file is src/coverage.ts` | hub, foundation, leaf or entry point — judged by graph position |
+| `subsystems` | directories by size, and any that import each other both ways |
+| `legend` | what every term above means |
 
 Every number is computed from the model the Architecture and Visual tabs draw,
 so the answers and the pictures never disagree.
+
+The same definitions sit behind **What these terms mean** above the Architecture
+and Visual views, so the vocabulary is one click away wherever you meet it.
 
 It will not pretend to know more than the map holds. Ask whether a button works
 and it tells you plainly: static analysis describes **structure**, not
