@@ -4253,8 +4253,19 @@ function freeFindNode(m, text) {
 
 function freeOverview(m) {
   const st = m.arch.stats || {};
+  // mapd reports .ts as "js", which reads badly on a TypeScript repo. The
+  // extension is authoritative; fall back to mapd only for what it misses.
+  const EXT_LANG = { ts: "TypeScript", tsx: "TypeScript", mts: "TypeScript", cts: "TypeScript",
+    js: "JavaScript", jsx: "JavaScript", mjs: "JavaScript", cjs: "JavaScript",
+    py: "Python", rb: "Ruby", go: "Go", rs: "Rust", java: "Java", kt: "Kotlin",
+    php: "PHP", cs: "C#", swift: "Swift", c: "C", h: "C", cpp: "C++", hpp: "C++",
+    css: "CSS", scss: "CSS", html: "HTML", vue: "Vue", svelte: "Svelte", sh: "Shell", json: "JSON" };
   const langs = {};
-  for (const nd of m.nodes) if (nd.lang) langs[nd.lang] = (langs[nd.lang] || 0) + 1;
+  for (const nd of m.nodes) {
+    const ext = (nd.path.split(".").pop() || "").toLowerCase();
+    const lang = EXT_LANG[ext] || nd.lang;
+    if (lang) langs[lang] = (langs[lang] || 0) + 1;
+  }
   const langStr = Object.entries(langs).sort((a, b) => b[1] - a[1]).slice(0, 4)
     .map(([l, c]) => l + " (" + c + ")").join(", ") || "—";
   const cyc = m.sccs.filter((s) => s.length > 1).length;
@@ -4287,7 +4298,7 @@ function freeUntested(m) {
   if (!gaps.length) return "<p>mapd reported no test gaps — though " + m.testCounts.unknown + " files were never assessed, which is not the same as covered.</p>";
   gaps.sort((a, b) => (b[1].loc || 0) - (a[1].loc || 0));
   const rows = gaps.slice(0, 12).map(([i, nd]) => fcode(nd.path) + " <span class='muted'>— " + (nd.loc || 0)
-    + " loc, " + TEST_WORD[nd.test] + (m.blast[i] ? ", " + m.blast[i] + " file" + (m.blast[i] === 1 ? "" : "s") + " depend on it" : "") + "</span>");
+    + " loc, " + TEST_WORD[nd.test] + (m.blast[i] ? ", " + m.blast[i] + (m.blast[i] === 1 ? " file depends" : " files depend") + " on it" : "") + "</span>");
   return "<p><b>" + gaps.length + " file" + (gaps.length === 1 ? "" : "s") + " with a test gap</b>, biggest first:</p>" + flist(rows)
     + (gaps.length > 12 ? "<p class='muted'>… and " + (gaps.length - 12) + " more.</p>" : "")
     + "<p class='muted'>Silence is not coverage: " + m.testCounts.unknown + " files were never assessed.</p>";
