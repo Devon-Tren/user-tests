@@ -288,6 +288,16 @@ button.btn:disabled{opacity:.55;cursor:default;transform:none}
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
 /* chat */
+.explore-legend{margin:6px 0 2px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--panel2)}
+.explore-legend summary{cursor:pointer;padding:7px 12px;font-size:12px;color:var(--muted);list-style:none;user-select:none}
+.explore-legend summary::-webkit-details-marker{display:none}
+.explore-legend summary::before{content:"\203A";display:inline-block;transition:transform .15s;margin-right:7px}
+.explore-legend[open] summary::before{transform:rotate(90deg)}
+.explore-legend summary:hover{color:var(--text)}
+.explore-legend .legend-body{padding:2px 14px 10px;font-size:12px;color:var(--muted);columns:2;column-gap:26px}
+.explore-legend .legend-body p{margin:0 0 7px;break-inside:avoid}
+.explore-legend .legend-body b{color:var(--text)}
+@media (max-width:820px){.explore-legend .legend-body{columns:1}}
 #chat-fab{position:fixed;right:20px;bottom:20px;width:56px;height:56px;border-radius:50%;
   background:linear-gradient(135deg, var(--accent), var(--accent2));color:#fff;border:none;font-size:23px;cursor:pointer;
   box-shadow:0 10px 30px rgba(110,140,255,.5), inset 0 1px 0 rgba(var(--c-white),.35);z-index:20;transition:transform .2s, box-shadow .2s}
@@ -4222,6 +4232,27 @@ async function freeModel() {
   return FREE_INFLIGHT;
 }
 
+// mapd reports .ts as "js", which reads badly on a TypeScript repo. The file
+// extension is authoritative; mapd's own label is the fallback for the rest.
+const EXT_LANG = { ts: "TypeScript", tsx: "TypeScript", mts: "TypeScript", cts: "TypeScript",
+  js: "JavaScript", jsx: "JavaScript", mjs: "JavaScript", cjs: "JavaScript",
+  py: "Python", rb: "Ruby", go: "Go", rs: "Rust", java: "Java", kt: "Kotlin",
+  php: "PHP", cs: "C#", swift: "Swift", c: "C", h: "C", cpp: "C++", hpp: "C++",
+  css: "CSS", scss: "CSS", html: "HTML", vue: "Vue", svelte: "Svelte", sh: "Shell", json: "JSON" };
+const langOf = (nd) => EXT_LANG[(nd.path.split(".").pop() || "").toLowerCase()] || nd.lang || null;
+
+/** One definition list, shown in the chat as `legend` and above the code views. */
+const GLOSSARY = [
+  ["Entry point", "a file execution starts at \u2014 a bin, an npm script, a server start. Nothing imports it."],
+  ["Layer (L0, L1\u2026)", "how many import hops a file sits from an entry point. L0 is an entry point itself."],
+  ["Workflow", "a chain of files mapd found are used together, so probably one feature. Confidence says how sure it is."],
+  ["Dependents / blast radius", "every file that would load your change, directly or through others."],
+  ["Hub / foundation", "a hub is imported by many and imports many; a foundation is imported by many and imports almost nothing."],
+  ["Orphan", "no import reaches it and it imports nothing. Often a script or config, sometimes dead code."],
+  ["Cycle", "files that import each other in a loop, so none can be understood alone."],
+  ["Untested vs not assessed", "untested means no test file imports it. Not assessed means mapd never judged it \u2014 which is not the same as covered."],
+  ["Risk", "0\u2013100 from size, how much depends on it, and whether tests reach it. Structural exposure, not a defect count."],
+];
 const fcode = (s) => "<code>" + esc(String(s)) + "</code>";
 const fpct = (x) => (x == null ? "—" : Math.round(x * 100) + "%");
 function flist(items) { return "<ul>" + items.map((i) => "<li>" + i + "</li>").join("") + "</ul>"; }
@@ -4232,40 +4263,151 @@ const TEST_WORD = {
   unknown: "not assessed",
 };
 
-/** Pull a file-ish token out of the question and find the node it names. */
-function freeFindNode(m, text) {
-  const toks = (text.match(/[\w./-]+/g) || []).filter((t) => t.length > 2);
-  let best = null, bestScore = 0;
+/** Every node the question names, in the order named. */
+function freeFindNodes(m, text) {
+  const STOP = /^(the|what|file|files|about|import|imports|depend|depends|use|uses|who|which|does|do|tell|show|how|from|reach|reaches|change|changing|break|breaks|if|kind|and|for|its|it|this|that|much|many|role|impact|path|between)$/i;
+  const toks = (text.match(/[\w./-]+/g) || []).filter((t) => t.length > 2 && !STOP.test(t));
+  const found = [];
   for (const t of toks) {
     const low = t.toLowerCase();
-    if (/^(the|what|file|about|imports?|depends?|uses?|who|which|does|tell|show)$/.test(low)) continue;
+    let best = null, score = 0;
     m.nodes.forEach((nd, i) => {
       const p = nd.path.toLowerCase(), nm = (nd.name || "").toLowerCase();
       let sc = 0;
       if (p === low || nm === low) sc = 100;
       else if (nm.startsWith(low) || low.startsWith(nm)) sc = 60;
       else if (p.includes(low)) sc = 40 - Math.abs(p.length - low.length) / 100;
-      if (sc > bestScore) { bestScore = sc; best = i; }
+      if (sc > score) { score = sc; best = i; }
     });
+    if (score >= 40 && best != null && !found.includes(best)) found.push(best);
   }
-  return bestScore >= 40 ? best : null;
+  return found;
 }
+
+/** 1. Layers — how far each file sits from an entry point. */
+function freeLayers(m) {
+  const tiers = new Map();
+  m.depth.forEach((d, i) => { if (d !== Infinity) { if (!tiers.has(d)) tiers.set(d, []); tiers.get(d).push(i); } });
+  if (!tiers.size) return "<p>Nothing is reachable from an entry point, so there are no layers to walk.</p>";
+  const rows = [...tiers.keys()].sort((a, b) => a - b).map((d) => {
+    const ids = tiers.get(d).sort((a, b) => (m.nodes[b].loc || 0) - (m.nodes[a].loc || 0));
+    const label = d === 0 ? "<b>L0 — entry points</b>" : "<b>L" + d + "</b> <span class='muted'>" + d + " import" + (d === 1 ? "" : "s") + " deep</span>";
+    return label + " — " + ids.length + " file" + (ids.length === 1 ? "" : "s") + "<br><span class='muted'>"
+      + ids.slice(0, 3).map((i) => esc(m.nodes[i].path)).join(", ") + (ids.length > 3 ? ", …" : "") + "</span>";
+  });
+  const unreached = m.n - [...tiers.values()].reduce((a, l) => a + l.length, 0);
+  return "<p><b>The shape of this codebase</b> — each layer is one import hop further from where execution starts:</p>"
+    + flist(rows)
+    + (unreached ? "<p class='muted'>" + unreached + " file" + (unreached === 1 ? " is" : "s are")
+        + " not reachable from any entry point — usually tests, scripts or dead code.</p>" : "")
+    + "<p class='muted'>Deep layers are not worse than shallow ones. A file's layer says how indirectly it is used, nothing more.</p>";
+}
+
+/** 2. Impact — what a change to this file can reach. */
+function freeImpact(m, text) {
+  const hits = freeFindNodes(m, text);
+  if (!hits.length) return null;
+  const i = hits[0], nd = m.nodes[i];
+  const dep = [...m.dependents[i]];
+  if (!dep.length) return "<p>Nothing imports " + fcode(nd.path) + ", so a change to it reaches no other file in this repo.</p>"
+    + (nd.entry ? "<p class='muted'>It is an entry point, so it is run directly rather than imported.</p>" : "");
+  const untested = dep.filter((j) => m.nodes[j].test === "untested");
+  const direct = m.inn[i];
+  return "<p><b>Changing " + fcode(nd.path) + " can reach " + dep.length + " file"
+    + (dep.length === 1 ? "" : "s") + "</b> — " + direct.length + " import it directly, the rest follow from those.</p>"
+    + flist(direct.slice(0, 10).map((j) => fcode(m.nodes[j].path)
+        + (m.nodes[j].test === "untested" ? " <span class='muted'>— no test imports it</span>" : "")))
+    + (untested.length
+        ? "<p><b>" + untested.length + " of the " + dep.length + " have no test importing them</b>, so a regression there would not be caught by this suite.</p>"
+        : "<p>Every dependent has a test importing it.</p>");
+}
+
+/** 3. Path — how one file reaches another through imports. */
+function freePath(m, text) {
+  const hits = freeFindNodes(m, text);
+  if (hits.length < 2) return null;
+  const [a, b] = hits;
+  const walk = (from, to) => {
+    const prev = new Map([[from, null]]); const q = [from];
+    while (q.length) {
+      const v = q.shift();
+      if (v === to) break;
+      for (const w of m.out[v]) if (!prev.has(w)) { prev.set(w, v); q.push(w); }
+    }
+    if (!prev.has(to)) return null;
+    const out = []; for (let c = to; c != null; c = prev.get(c)) { out.unshift(c); if (c === from) break; }
+    return out;
+  };
+  let p = walk(a, b), rev = false;
+  if (!p) { p = walk(b, a); rev = !!p; }
+  if (!p) return "<p>No import path runs between " + fcode(m.nodes[a].path) + " and " + fcode(m.nodes[b].path)
+    + " in either direction — nothing connects them.</p>";
+  const chain = p.map((i) => fcode(m.nodes[i].path)).join(" → ");
+  return "<p><b>" + (p.length - 1) + " import hop" + (p.length === 2 ? "" : "s")
+    + (rev ? " (the other way round)" : "") + ":</b></p><p>" + chain + "</p>";
+}
+
+/** 4. Role — what a file is, judged only by where it sits in the graph. */
+function freeRole(m, text) {
+  const hits = freeFindNodes(m, text);
+  if (!hits.length) return null;
+  const i = hits[0], nd = m.nodes[i];
+  const inD = m.inDeg[i], outD = m.outDeg[i];
+  const cyc = m.sccs.find((s) => s.length > 1 && s.includes(i));
+  let role, why;
+  if (nd.entry) { role = "an entry point"; why = "execution starts here; it pulls in " + m.deps[i].size + " file" + (m.deps[i].size === 1 ? "" : "s"); }
+  else if (!inD && !outD) { role = "isolated"; why = "no import reaches it and it imports nothing — a script, config, or dead code"; }
+  else if (inD >= 3 && outD <= 1) { role = "a foundation"; why = inD + " files import it and it depends on almost nothing, so it sits underneath the rest"; }
+  else if (inD >= 3 && outD >= 3) { role = "a hub"; why = inD + " files import it and it imports " + outD + " — traffic passes through it in both directions"; }
+  else if (!outD) { role = "a leaf"; why = "it imports nothing; " + inD + " file" + (inD === 1 ? "" : "s") + " depend on it"; }
+  else if (!inD) { role = "a top-level caller"; why = "nothing imports it, and it pulls in " + outD + " file" + (outD === 1 ? "" : "s"); }
+  else { role = "an ordinary module"; why = inD + " in, " + outD + " out"; }
+  return "<p>" + fcode(nd.path) + " is <b>" + role + "</b> — " + why + ".</p>"
+    + flist([
+      "Depth " + (m.depth[i] === Infinity ? "unreachable from any entry point" : "L" + m.depth[i]),
+      "Changing it can reach " + m.dependents[i].size + " file" + (m.dependents[i].size === 1 ? "" : "s"),
+      "Tests: " + TEST_WORD[nd.test],
+      "Risk " + m.risk[i] + " of 100",
+    ])
+    + (cyc ? "<p><b>It is part of an import cycle</b> with " + (cyc.length - 1) + " other file"
+        + (cyc.length === 2 ? "" : "s") + ", so these cannot be loaded or reasoned about independently.</p>" : "")
+    + "<p class='muted'>This is its position in the import graph, not what it does.</p>";
+}
+
+/** 5. Subsystems — directories, and how tangled they are with each other. */
+function freeCoupling(m) {
+  const dirs = m.dirList.slice(0, 8);
+  if (!dirs.length) return "<p>No directory structure to report.</p>";
+  const rows = dirs.map((d, i) => {
+    const outs = m.coupling[i] ? m.coupling[i].reduce((a, b) => a + b, 0) : 0;
+    const ins = m.coupling.reduce((a, row) => a + (row[i] || 0), 0);
+    const tag = !outs && !ins ? " <span class='muted'>— not connected by imports at all</span>" : "";
+    return "<b>" + esc(d.dir) + "</b> <span class='muted'>— " + (d.loc || 0) + " loc, imports out " + outs + ", imported by " + ins + "</span>" + tag;
+  });
+  const both = [];
+  for (let a = 0; a < dirs.length; a++) for (let b = a + 1; b < dirs.length; b++) {
+    if ((m.coupling[a] || [])[b] && (m.coupling[b] || [])[a]) both.push([dirs[a].dir, dirs[b].dir, m.coupling[a][b], m.coupling[b][a]]);
+  }
+  return "<p><b>Subsystems</b>, by how much code each holds and how much crosses the boundary:</p>" + flist(rows)
+    + (both.length
+        ? "<p><b>Two-way coupling</b> — these import each other, so neither can move without the other:</p>"
+          + flist(both.map(([x, y, i1, i2]) => esc(x) + " ↔ " + esc(y) + " <span class='muted'>(" + i1 + " and " + i2 + " imports)</span>"))
+        : "<p class='muted'>No directory imports another that imports it back — boundaries run one way.</p>");
+}
+
+/** 6. Glossary — every term these answers use. */
+function freeGlossary() {
+  return "<p><b>What these words mean here.</b> All of them come from the import graph, not from running anything:</p>"
+    + flist(GLOSSARY.map(([t, d]) => "<b>" + esc(t) + "</b> \u2014 " + esc(d)))
+    + "<p class='muted'>None of these say whether the code works. That needs a run.</p>";
+}
+
+const freeFindNode = (m, text) => { const f = freeFindNodes(m, text); return f.length ? f[0] : null; };
 
 function freeOverview(m) {
   const st = m.arch.stats || {};
-  // mapd reports .ts as "js", which reads badly on a TypeScript repo. The
-  // extension is authoritative; fall back to mapd only for what it misses.
-  const EXT_LANG = { ts: "TypeScript", tsx: "TypeScript", mts: "TypeScript", cts: "TypeScript",
-    js: "JavaScript", jsx: "JavaScript", mjs: "JavaScript", cjs: "JavaScript",
-    py: "Python", rb: "Ruby", go: "Go", rs: "Rust", java: "Java", kt: "Kotlin",
-    php: "PHP", cs: "C#", swift: "Swift", c: "C", h: "C", cpp: "C++", hpp: "C++",
-    css: "CSS", scss: "CSS", html: "HTML", vue: "Vue", svelte: "Svelte", sh: "Shell", json: "JSON" };
   const langs = {};
-  for (const nd of m.nodes) {
-    const ext = (nd.path.split(".").pop() || "").toLowerCase();
-    const lang = EXT_LANG[ext] || nd.lang;
-    if (lang) langs[lang] = (langs[lang] || 0) + 1;
-  }
+  for (const nd of m.nodes) { const l = langOf(nd); if (l) langs[l] = (langs[l] || 0) + 1; }
   const langStr = Object.entries(langs).sort((a, b) => b[1] - a[1]).slice(0, 4)
     .map(([l, c]) => l + " (" + c + ")").join(", ") || "—";
   const cyc = m.sccs.filter((s) => s.length > 1).length;
@@ -4381,7 +4523,7 @@ function freeFile(m, i) {
     + (f.exported ? ", exported" : "") + (f.async ? ", async" : "") + "</span>");
   return "<p><b>" + esc(nd.path) + "</b></p>"
     + flist([
-      (nd.loc || 0) + " lines, " + (nd.fns || []).length + " functions" + (nd.lang ? ", " + esc(nd.lang) : ""),
+      (nd.loc || 0) + " lines, " + (nd.fns || []).length + " functions" + (langOf(nd) ? ", " + esc(langOf(nd)) : ""),
       "Tests: " + TEST_WORD[nd.test],
       "Imports " + m.outDeg[i] + " local file" + (m.outDeg[i] === 1 ? "" : "s") + "; " + m.inDeg[i] + " import it directly, " + m.dependents[i].size + " depend on it in total",
       nd.entry ? "Entry point (" + esc(nd.entry) + ")" : "Not an entry point",
@@ -4401,12 +4543,24 @@ function freeHelp() {
       "<i>biggest files</i>, <i>orphans</i>, <i>cycles</i>",
       "<i>what depends on &lt;file&gt;</i> / <i>what does &lt;file&gt; import</i>",
       "<i>tell me about &lt;file&gt;</i>",
+      "<i>explain the architecture</i> — the layers, from entry points down",
+      "<i>what breaks if I change &lt;file&gt;</i> — blast radius, and how much of it is untested",
+      "<i>how does &lt;file&gt; reach &lt;file&gt;</i> — the import path between two files",
+      "<i>what kind of file is &lt;file&gt;</i> — hub, foundation, leaf, entry point",
+      "<i>subsystems</i> — directories and two-way coupling",
+      "<i>legend</i> — what every term above means",
     ])
     + "<p class='muted'>What I cannot tell you is whether any of it works. That needs a run.</p>";
 }
 
 const FREE_INTENTS = [
   [/^\s*(help|what can (you|i) ask|commands?)\s*\??$/i, (m) => freeHelp()],
+  [/\b(legend|glossary|terminolog|what do(es)? .{0,20}\b(mean|means)\b|define|jargon)\b/i, () => freeGlossary()],
+  [/\b(what breaks|impact|blast radius|if i (change|edit|touch)|safe to (change|edit|touch)|consequence)\b/i, freeImpact],
+  [/\b(how does .{1,40} (reach|get to|connect)|path (from|between)|connected to|route from)\b/i, freePath],
+  [/\b(what kind of file|what role|role of|what is .{1,30}\.(ts|js|tsx|jsx|py|go|rb)\b.{0,12}(for|doing)?)\b/i, freeRole],
+  [/\b(layers?|hierarch|tiers?|explain the (architecture|structure)|how is (it|this) (built|structured|organi))\b/i, (m) => freeLayers(m)],
+  [/\b(subsystems?|coupling|modules?|directories|boundaries|tangled|folder structure)\b/i, (m) => freeCoupling(m)],
   [/\b(who|what)\b.{0,24}\b(depends? on|uses|imports|requires)\b|\bdependents?\b|\bwho uses\b/i, freeDependents],
   [/\b(what|which)\b.{0,24}\b(does|do)\b.{0,24}\b(import|depend|use|require)\b|\bdependencies\b/i, freeDeps],
   [/\b(entry ?points?|where does it start|starting point|main file)\b/i, (m) => freeEntries(m)],
@@ -4421,8 +4575,12 @@ const FREE_INTENTS = [
 
 /** Route a free-mode question to a graph query. Never throws on no-match. */
 function freeAnswer(m, text) {
+  // Match keywords against the question with file paths removed: "src/coverage.ts"
+  // must not trip the "coverage" intent, nor "src/probe.ts" the "workflows" one.
+  // Handlers still receive the original text, because they need the filename.
+  const kw = text.replace(/[\w@-]*[./][\w./@-]*/g, " ");
   for (const [re, fn] of FREE_INTENTS) {
-    if (!re.test(text)) continue;
+    if (!re.test(kw) && !re.test(text.replace(/\S*[./]\S*/g, " "))) continue;
     const out = fn(m, text);
     if (out) return out;           // file-scoped intents return null if no file matched
   }
@@ -5813,16 +5971,14 @@ function renderExplore() {
   host.innerHTML = "";
 
   const bar = el("div", "explore-bar");
-  for (const view of EXPLORE_VIEWS) {
+  // Free mode used to show Journey and Mind Map greyed out, so half the bar was
+  // dead on the one path a new visitor takes. Offer only what actually works.
+  const shown = EXPLORE_VIEWS.filter((v) => S.run || !runOnly.includes(v));
+  for (const view of shown) {
     const m = EXPLORE_META[view];
-    const needsRun = !S.run && runOnly.includes(view);
-    const b = el("button", "explore-pick" + (view === S.exploreView ? " on" : "") + (needsRun ? " off" : ""),
+    const b = el("button", "explore-pick" + (view === S.exploreView ? " on" : ""),
       `<span class="e">${m.icon}</span><span>${esc(m.label)}</span>`);
     b.type = "button";
-    if (needsRun) {
-      b.disabled = true;
-      b.title = "Needs a completed run — this view is built from what the testers did.";
-    }
     b.setAttribute("aria-pressed", String(view === S.exploreView));
     b.addEventListener("click", () => {
       if (S.exploreView === view) return;
@@ -5833,6 +5989,23 @@ function renderExplore() {
     bar.appendChild(b);
   }
   host.append(bar, el("p", "explore-blurb", esc(meta.blurb)));
+
+  // The code views carry all the graph jargon, and in free mode they are the
+  // only views there are. Keep the vocabulary one click away, not in a doc.
+  if (S.exploreView === "architecture" || S.exploreView === "visual") {
+    const leg = document.createElement("details");
+    leg.className = "explore-legend";
+    const sum = document.createElement("summary");
+    sum.textContent = "What these terms mean";
+    leg.appendChild(sum);
+    leg.appendChild(el("div", "legend-body",
+      GLOSSARY.map(([t, d]) => `<p><b>${esc(t)}</b> — ${esc(d)}</p>`).join("")));
+    host.appendChild(leg);
+  }
+  if (!S.run) {
+    host.appendChild(el("p", "explore-blurb muted",
+      "Journey and the mind map appear once a run has finished — they are built from what the testers did."));
+  }
 
   // The four views are untouched — they still own #main and clear it whenever
   // they like, including after an await. The switcher lives above #main so it
