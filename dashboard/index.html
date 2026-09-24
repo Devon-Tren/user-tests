@@ -4201,9 +4201,244 @@ const SLASH = {
   },
 };
 
+// ------------------------------------------------------------ free engine ---
+/**
+ * Free mode has no run and no API key, but mapd's graph already answers a lot
+ * about a codebase. Every answer below is a query over archModel() — the same
+ * model the Architecture and Visual views draw, so the numbers agree with the
+ * pictures. Deterministic, offline, and it never spends a token.
+ */
+let FREE_CACHE = null;   // { repo, model }
+let FREE_INFLIGHT = null;
+
+async function freeModel() {
+  const repo = S.archRepo || S.freeRepo;
+  if (FREE_CACHE && FREE_CACHE.repo === repo) return FREE_CACHE.model;
+  if (!FREE_INFLIGHT) {
+    FREE_INFLIGHT = api("/api/architecture" + archQuery())
+      .then((a) => { FREE_CACHE = { repo, model: archModel(a) }; FREE_INFLIGHT = null; return FREE_CACHE.model; })
+      .catch((e) => { FREE_INFLIGHT = null; throw e; });
+  }
+  return FREE_INFLIGHT;
+}
+
+const fcode = (s) => "<code>" + esc(String(s)) + "</code>";
+const fpct = (x) => (x == null ? "—" : Math.round(x * 100) + "%");
+function flist(items) { return "<ul>" + items.map((i) => "<li>" + i + "</li>").join("") + "</ul>"; }
+const TEST_WORD = {
+  untested: "no test imports it",
+  "tested-nameonly": "a test names it but never imports it",
+  "tested-shallow": "shallow test coverage",
+  unknown: "not assessed",
+};
+
+/** Pull a file-ish token out of the question and find the node it names. */
+function freeFindNode(m, text) {
+  const toks = (text.match(/[\w./-]+/g) || []).filter((t) => t.length > 2);
+  let best = null, bestScore = 0;
+  for (const t of toks) {
+    const low = t.toLowerCase();
+    if (/^(the|what|file|about|imports?|depends?|uses?|who|which|does|tell|show)$/.test(low)) continue;
+    m.nodes.forEach((nd, i) => {
+      const p = nd.path.toLowerCase(), nm = (nd.name || "").toLowerCase();
+      let sc = 0;
+      if (p === low || nm === low) sc = 100;
+      else if (nm.startsWith(low) || low.startsWith(nm)) sc = 60;
+      else if (p.includes(low)) sc = 40 - Math.abs(p.length - low.length) / 100;
+      if (sc > bestScore) { bestScore = sc; best = i; }
+    });
+  }
+  return bestScore >= 40 ? best : null;
+}
+
+function freeOverview(m) {
+  const st = m.arch.stats || {};
+  const langs = {};
+  for (const nd of m.nodes) if (nd.lang) langs[nd.lang] = (langs[nd.lang] || 0) + 1;
+  const langStr = Object.entries(langs).sort((a, b) => b[1] - a[1]).slice(0, 4)
+    .map(([l, c]) => l + " (" + c + ")").join(", ") || "—";
+  const cyc = m.sccs.filter((s) => s.length > 1).length;
+  return "<p><b>" + esc(String(m.arch.repo || "").split("/").pop() || "this repo") + "</b> — "
+    + st.fileCount + " source files, " + (st.totalLoc || 0).toLocaleString() + " lines.</p>"
+    + flist([
+      "Languages: " + esc(langStr),
+      m.entryIdx.length + " entry point" + (m.entryIdx.length === 1 ? "" : "s") + ", "
+        + (m.arch.workflows || []).length + " workflow" + ((m.arch.workflows || []).length === 1 ? "" : "s"),
+      m.testCounts.untested + " files no test imports, " + m.testCounts.unknown + " not assessed",
+      m.orphans + " orphaned, " + cyc + " import cycle" + (cyc === 1 ? "" : "s") + ", max import depth " + m.maxDepth,
+      "Import resolution " + fpct(st.importResolutionRate) + ", call resolution " + fpct(st.callResolutionRate),
+    ])
+    + (st.truncated ? "<p class='muted'>Showing the " + st.shown + " most connected files of " + st.fileCount + ".</p>" : "")
+    + "<p>Ask me <i>entry points</i>, <i>what's untested</i>, <i>where should I start</i>, <i>workflows</i>, <i>biggest files</i>, <i>cycles</i>, or <i>what depends on &lt;file&gt;</i>.</p>";
+}
+
+function freeEntries(m) {
+  if (!m.entryIdx.length) return "<p>mapd found no entry points — nothing here looks like a bin, script or server start.</p>";
+  const rows = m.entryIdx
+    .sort((a, b) => (m.nodes[b].loc || 0) - (m.nodes[a].loc || 0))
+    .map((i) => fcode(m.nodes[i].path) + " <span class='muted'>— " + esc(m.nodes[i].entry)
+      + ", " + (m.nodes[i].loc || 0) + " loc, reaches " + m.deps[i].size + " file" + (m.deps[i].size === 1 ? "" : "s") + "</span>");
+  return "<p><b>" + rows.length + " entry point" + (rows.length === 1 ? "" : "s") + "</b> — where execution starts:</p>" + flist(rows)
+    + "<p class='muted'>" + m.reachable.size + " of " + m.n + " files are reachable from them.</p>";
+}
+
+function freeUntested(m) {
+  const gaps = m.nodes.map((nd, i) => [i, nd]).filter(([, nd]) => nd.test === "untested" || nd.test === "tested-nameonly");
+  if (!gaps.length) return "<p>mapd reported no test gaps — though " + m.testCounts.unknown + " files were never assessed, which is not the same as covered.</p>";
+  gaps.sort((a, b) => (b[1].loc || 0) - (a[1].loc || 0));
+  const rows = gaps.slice(0, 12).map(([i, nd]) => fcode(nd.path) + " <span class='muted'>— " + (nd.loc || 0)
+    + " loc, " + TEST_WORD[nd.test] + (m.blast[i] ? ", " + m.blast[i] + " file" + (m.blast[i] === 1 ? "" : "s") + " depend on it" : "") + "</span>");
+  return "<p><b>" + gaps.length + " file" + (gaps.length === 1 ? "" : "s") + " with a test gap</b>, biggest first:</p>" + flist(rows)
+    + (gaps.length > 12 ? "<p class='muted'>… and " + (gaps.length - 12) + " more.</p>" : "")
+    + "<p class='muted'>Silence is not coverage: " + m.testCounts.unknown + " files were never assessed.</p>";
+}
+
+function freeRisk(m) {
+  const order = m.nodes.map((_, i) => i).sort((a, b) => m.risk[b] - m.risk[a]).slice(0, 8);
+  const rows = order.map((i) => {
+    const nd = m.nodes[i];
+    const why = [];
+    if ((nd.loc || 0) >= m.locStats.median * 2) why.push("large");
+    if (m.blast[i] >= 3) why.push(m.blast[i] + " dependents");
+    if (nd.test === "untested" || nd.test === "tested-nameonly") why.push(TEST_WORD[nd.test]);
+    if (nd.entry) why.push("entry point");
+    return fcode(nd.path) + " <span class='muted'>— risk " + m.risk[i] + (why.length ? "; " + esc(why.join(", ")) : "") + "</span>";
+  });
+  return "<p><b>Where I would look first.</b> Ranked by size, how much depends on it, and whether tests reach it — the same score the Visual tab colours by:</p>"
+    + flist(rows)
+    + "<p class='muted'>This is structural risk from static analysis. It says what is exposed, not what is broken — only a run finds real defects.</p>";
+}
+
+function freeWorkflows(m) {
+  const wfs = m.arch.workflows || [];
+  if (!wfs.length) return "<p>mapd inferred no workflows here.</p>";
+  const rows = wfs.slice(0, 12).map((w) => "<b>" + esc(w.id) + "</b> <span class='muted'>— " + w.files
+    + " file" + (w.files === 1 ? "" : "s") + ", confidence " + Math.round((w.confidence || 0) * 100) + "%"
+    + (w.entry ? ", entry " + esc(w.entry) : "") + "</span>"
+    + (w.exportedSurface && w.exportedSurface.length ? "<br><span class='muted'>surface: " + esc(w.exportedSurface.slice(0, 5).join(", ")) + "</span>" : ""));
+  return "<p><b>" + wfs.length + " workflow" + (wfs.length === 1 ? "" : "s")
+    + "</b> — chains of files mapd found are used together, i.e. suspected features:</p>" + flist(rows);
+}
+
+function freeBiggest(m) {
+  const order = m.nodes.map((_, i) => i).sort((a, b) => (m.nodes[b].loc || 0) - (m.nodes[a].loc || 0)).slice(0, 10);
+  return "<p><b>Largest files</b> (median is " + m.locStats.median + " loc):</p>"
+    + flist(order.map((i) => fcode(m.nodes[i].path) + " <span class='muted'>— " + (m.nodes[i].loc || 0)
+      + " loc, " + (m.nodes[i].fns || []).length + " functions</span>"));
+}
+
+function freeOrphans(m) {
+  const orph = m.nodes.map((nd, i) => [i, nd]).filter(([i]) => !m.outDeg[i] && !m.inDeg[i]);
+  if (!orph.length) return "<p>No orphans — every file is connected by at least one import.</p>";
+  return "<p><b>" + orph.length + " file" + (orph.length === 1 ? "" : "s")
+    + " no import reaches or leaves.</b> Often scripts, config or genuinely dead code:</p>"
+    + flist(orph.slice(0, 12).map(([, nd]) => fcode(nd.path) + " <span class='muted'>— " + (nd.loc || 0) + " loc</span>"));
+}
+
+function freeCycles(m) {
+  const cyc = m.sccs.filter((s) => s.length > 1);
+  if (!cyc.length) return "<p>No import cycles — the graph is acyclic.</p>";
+  return "<p><b>" + cyc.length + " import cycle" + (cyc.length === 1 ? "" : "s") + ":</b></p>"
+    + flist(cyc.slice(0, 6).map((s) => s.length + " files: " + s.slice(0, 5).map((i) => fcode(m.nodes[i].name)).join(" → ")));
+}
+
+function freeDependents(m, text) {
+  const i = freeFindNode(m, text);
+  if (i == null) return null;
+  const nd = m.nodes[i];
+  const direct = m.inn[i].map((j) => fcode(m.nodes[j].path));
+  const total = m.dependents[i].size;
+  if (!direct.length) return "<p>Nothing imports " + fcode(nd.path) + ".</p>";
+  return "<p><b>" + direct.length + " file" + (direct.length === 1 ? "" : "s") + " import " + fcode(nd.path) + "</b>"
+    + (total > direct.length ? " (" + total + " depend on it transitively)" : "") + ":</p>" + flist(direct.slice(0, 15));
+}
+
+function freeDeps(m, text) {
+  const i = freeFindNode(m, text);
+  if (i == null) return null;
+  const nd = m.nodes[i];
+  const direct = m.out[i].map((j) => fcode(m.nodes[j].path));
+  if (!direct.length) return "<p>" + fcode(nd.path) + " imports nothing inside this repo"
+    + (nd.imports && nd.imports.length ? ", though it pulls in " + esc(nd.imports.slice(0, 5).join(", ")) : "") + ".</p>";
+  return "<p><b>" + fcode(nd.path) + " imports " + direct.length + " file" + (direct.length === 1 ? "" : "s")
+    + "</b> (" + m.deps[i].size + " transitively):</p>" + flist(direct.slice(0, 15));
+}
+
+function freeFile(m, i) {
+  const nd = m.nodes[i];
+  const fns = (nd.fns || []).slice(0, 8).map((f) => fcode(f.name) + " <span class='muted'>" + (f.loc || 0) + " loc"
+    + (f.exported ? ", exported" : "") + (f.async ? ", async" : "") + "</span>");
+  return "<p><b>" + esc(nd.path) + "</b></p>"
+    + flist([
+      (nd.loc || 0) + " lines, " + (nd.fns || []).length + " functions" + (nd.lang ? ", " + esc(nd.lang) : ""),
+      "Tests: " + TEST_WORD[nd.test],
+      "Imports " + m.outDeg[i] + " local file" + (m.outDeg[i] === 1 ? "" : "s") + "; " + m.inDeg[i] + " import it directly, " + m.dependents[i].size + " depend on it in total",
+      nd.entry ? "Entry point (" + esc(nd.entry) + ")" : "Not an entry point",
+      "Risk score " + m.risk[i] + " of 100",
+    ])
+    + (fns.length ? "<p>Largest functions:</p>" + flist(fns) : "");
+}
+
+function freeHelp() {
+  return "<p>I read mapd's static map of your code. No key, no run, no tokens — so I can describe <b>structure</b>, not behaviour.</p>"
+    + flist([
+      "<i>overview</i> — size, languages, entry points, coverage",
+      "<i>entry points</i> — where execution starts",
+      "<i>what's untested</i> — files no test imports",
+      "<i>where should I start</i> — structural risk ranking",
+      "<i>workflows</i> — suspected features",
+      "<i>biggest files</i>, <i>orphans</i>, <i>cycles</i>",
+      "<i>what depends on &lt;file&gt;</i> / <i>what does &lt;file&gt; import</i>",
+      "<i>tell me about &lt;file&gt;</i>",
+    ])
+    + "<p class='muted'>What I cannot tell you is whether any of it works. That needs a run.</p>";
+}
+
+const FREE_INTENTS = [
+  [/^\s*(help|what can (you|i) ask|commands?)\s*\??$/i, (m) => freeHelp()],
+  [/\b(who|what)\b.{0,24}\b(depends? on|uses|imports|requires)\b|\bdependents?\b|\bwho uses\b/i, freeDependents],
+  [/\b(what|which)\b.{0,24}\b(does|do)\b.{0,24}\b(import|depend|use|require)\b|\bdependencies\b/i, freeDeps],
+  [/\b(entry ?points?|where does it start|starting point|main file)\b/i, (m) => freeEntries(m)],
+  [/\b(untested|no tests?|without tests?|test gaps?|coverage)\b/i, (m) => freeUntested(m)],
+  [/\b(risk|riskiest|dangerous|fragile|hotspot|where (should|do) i (start|look)|what should i (look at|read|fix))\b/i, (m) => freeRisk(m)],
+  [/\b(workflows?|features?|capabilit|what does (it|this) do)\b/i, (m) => freeWorkflows(m)],
+  [/\b(biggest|largest|longest|most code|heaviest)\b/i, (m) => freeBiggest(m)],
+  [/\b(orphans?|dead code|unused|disconnected|detached)\b/i, (m) => freeOrphans(m)],
+  [/\b(cycles?|circular|import loop)\b/i, (m) => freeCycles(m)],
+  [/\b(overview|summar|what is this|about this|how big|how many files|how many lines)\b/i, (m) => freeOverview(m)],
+];
+
+/** Route a free-mode question to a graph query. Never throws on no-match. */
+function freeAnswer(m, text) {
+  for (const [re, fn] of FREE_INTENTS) {
+    if (!re.test(text)) continue;
+    const out = fn(m, text);
+    if (out) return out;           // file-scoped intents return null if no file matched
+  }
+  const i = freeFindNode(m, text); // "tell me about src/cli.ts", or a bare filename
+  if (i != null) return freeFile(m, i);
+  return "<p>I could not turn that into a question about the code map.</p>" + freeHelp();
+}
+
 async function sendChat(raw) {
   const text = raw.trim();
-  if (!text || !S.run) return;
+  if (!text) return;
+  // Free mode has a mapped repo but no run, and the analyst reads a run's
+  // findings. Swallowing the question silently just looks broken.
+  if (!S.run) {
+    addMsg("user", esc(text));
+    if (!haveGraph()) {
+      addMsg("bot", "<p>Map a codebase first and I can answer from its structure.</p>");
+      return;
+    }
+    const fbody = addMsg("bot", "<span class='typing'><i></i><i></i><i></i></span>");
+    try {
+      fbody.innerHTML = freeAnswer(await freeModel(), text);
+    } catch (e) {
+      fbody.innerHTML = "<p>I could not read the code map: " + esc(e.message || String(e)) + "</p>";
+    }
+    return;
+  }
   addMsg("user", esc(text));
   const m = text.match(/^(\/\w+)\s*(.*)$/);
   if (m && SLASH[m[1]]) { SLASH[m[1]](m[2]); return; }
