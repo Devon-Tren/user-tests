@@ -33,7 +33,7 @@ import { callLLM } from "./llm.js";
 import { RunLogger } from "./logger.js";
 import { RunChat, type ChatTurn } from "./chat.js";
 import { ARTIFACT_MIME, artifactIndex, readArtifact, resolveArtifact } from "./artifacts.js";
-import { fetchMapdGraph, fetchMapdGaps } from "./coverage.js";
+import { fetchMapdGraph, fetchMapdGaps, MAPD_INTERACTIVE_TIMEOUT_MS } from "./coverage.js";
 import { loadConfig } from "./config.js";
 import { estimateRun } from "./estimate.js";
 import { probeLocalServersDetailed } from "./probe.js";
@@ -482,12 +482,12 @@ async function architecturePayload(
     }
   }
 
-  const graph = (await fetchMapdGraph(repo, { path: "mapd" })) as unknown as FullGraph;
+  const graph = (await fetchMapdGraph(repo, { path: "mapd" }, MAPD_INTERACTIVE_TIMEOUT_MS)) as unknown as FullGraph;
   type GapsShape = {
     gaps?: { file?: string; status?: string }[];
     files?: { file?: string; status?: string }[];
   };
-  const gaps: GapsShape = await fetchMapdGaps(repo, { path: "mapd" }).catch(() => ({}) as GapsShape);
+  const gaps: GapsShape = await fetchMapdGaps(repo, { path: "mapd" }, MAPD_INTERACTIVE_TIMEOUT_MS).catch(() => ({}) as GapsShape);
   // Prefer the full per-file list: it distinguishes "tested" from "not
   // assessed". Fall back to the gaps-only list for older mapd builds, where
   // silence genuinely means unknown rather than covered.

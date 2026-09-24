@@ -24,6 +24,12 @@ import type { MapdConfig } from "./config.js";
 
 const execFileP = promisify(execFile);
 const MAPD_TIMEOUT_MS = 15_000;
+/**
+ * The briefing runs mid-run and fails open, so it stays on a short leash. The
+ * Architecture tab and free mode are the opposite: someone asked for this and
+ * is watching a spinner, and a real repo can take far longer than 15s to map.
+ */
+export const MAPD_INTERACTIVE_TIMEOUT_MS = 120_000;
 /** Per-section line caps keep the briefing inside its char budget. */
 const MAX_ENTRY_LINES = 15;
 const MAX_WORKFLOW_LINES = 10;
@@ -66,15 +72,29 @@ const GAP_PRIORITY: Record<string, number> = { untested: 0, "tested-nameonly": 1
 async function runMapd(
   cfg: { path: string },
   args: string[],
-  repoPath: string
+  repoPath: string,
+  timeoutMs: number = MAPD_TIMEOUT_MS
 ): Promise<{ stdout: string }> {
-  // execFile resolves bare names via PATH and absolute paths directly.
-  return execFileP(cfg.path, args, {
-    cwd: repoPath,
-    timeout: MAPD_TIMEOUT_MS,
-    maxBuffer: 32 * 1024 * 1024, // big repos emit big JSON
-    env: { ...process.env, NO_COLOR: "1" },
-  });
+  try {
+    // execFile resolves bare names via PATH and absolute paths directly.
+    return await execFileP(cfg.path, args, {
+      cwd: repoPath,
+      timeout: timeoutMs,
+      maxBuffer: 32 * 1024 * 1024, // big repos emit big JSON
+      env: { ...process.env, NO_COLOR: "1" },
+    });
+  } catch (e) {
+    // A timeout arrives as a SIGTERM kill, whose default message is just
+    // "Command failed: mapd map …" — which reads like mapd is broken.
+    const err = e as { killed?: boolean; signal?: string };
+    if (err.killed || err.signal === "SIGTERM") {
+      throw new Error(
+        `mapd took longer than ${Math.round(timeoutMs / 1000)}s on this folder. ` +
+          `Very large folders, or ones holding several projects, can exceed it — try a single project folder.`
+      );
+    }
+    throw e;
+  }
 }
 
 function capLines(lines: string[], max: number): string[] {
@@ -87,19 +107,19 @@ function capLines(lines: string[], max: number): string[] {
  * These THROW on failure — callers decide how to fail (briefing is fail-open,
  * the architecture tab shows an error).
  */
-export async function fetchMapdGraph(repoPath: string, cfg: { path: string }): Promise<MapdGraph> {
+export async function fetchMapdGraph(repoPath: string, cfg: { path: string }, timeoutMs?: number): Promise<MapdGraph> {
   const tmp = mkdtempSync(path.join(tmpdir(), "usertests-mapd-"));
   const graphFile = path.join(tmp, "graph.json");
   try {
-    await runMapd(cfg, ["map", "--json", graphFile, "."], repoPath);
+    await runMapd(cfg, ["map", "--json", graphFile, "."], repoPath, timeoutMs);
     return JSON.parse(readFileSync(graphFile, "utf8")) as MapdGraph;
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
 }
 
-export async function fetchMapdGaps(repoPath: string, cfg: { path: string }): Promise<MapdGaps> {
-  const { stdout } = await runMapd(cfg, ["tools", "test", "gaps", "--json", "."], repoPath);
+export async function fetchMapdGaps(repoPath: string, cfg: { path: string }, timeoutMs?: number): Promise<MapdGaps> {
+  const { stdout } = await runMapd(cfg, ["tools", "test", "gaps", "--json", "."], repoPath, timeoutMs);
   return JSON.parse(stdout) as MapdGaps;
 }
 
