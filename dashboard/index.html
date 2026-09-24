@@ -4835,10 +4835,18 @@ function modePicker(wrap) {
   free.innerHTML = `<div class="nm">🗺️ Map a codebase<span class="tag ok">free</span></div>
     <div class="desc">Static analysis only. See the dependency map, risk hotspots, untested files
     and the 3D atlas of any project. <b>No API key, no run, costs nothing</b> — it never calls a model.</div>`;
-  const mapBtn = el("button", "btn", "📁 Pick a project to map");
+  // Free mode IS mapd static analysis; without it on PATH the only free
+  // action 404s with a spawn error. Say so up front rather than dead-end.
+  const noMapd = Boolean(S.setup && Array.isArray(S.setup.checks)
+    && S.setup.checks.some((c) => c.id === "mapd" && !c.ok));
+  const mapBtn = el("button", "btn" + (noMapd ? " ghost" : ""),
+    noMapd ? "Needs mapd on your PATH" : "📁 Pick a project to map");
   mapBtn.type = "button";
-  mapBtn.addEventListener("click", () => pickAndMap(mapBtn));
+  mapBtn.disabled = noMapd;
+  if (!noMapd) mapBtn.addEventListener("click", () => pickAndMap(mapBtn));
   free.appendChild(mapBtn);
+  if (noMapd) free.appendChild(el("div", "hint",
+    "Free mode is entirely mapd static analysis. It is not on npm yet — build it from source, then press Re-check below."));
 
   const paid = el("div", "mode paid");
   const blocked = S.setup && !S.setup.canRun;
