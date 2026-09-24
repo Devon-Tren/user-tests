@@ -7,3 +7,7 @@ runs/
 *.tgz
 coverage/
 .cache/
+
+# screen recordings: only the reviewed walkthrough is tracked
+*.mp4
+!docs/user-tests-walkthrough.mp4
