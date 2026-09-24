@@ -5280,6 +5280,12 @@ async function pickAndMap(btn) {
     btn.textContent = "Mapping…";
     S.freeRepo = r.path;
     S.archRepo = null;
+    // The mode picker also appears when a key is missing but runs already
+    // exist, and archQuery() prefers a selected run's ?dir= over ?repo=. Left
+    // set, the graph you just asked for would silently be some older run's
+    // repo instead. Free mode is defined by having no run.
+    S.run = null;
+    S.chatHistory = [];
     await api("/api/architecture?repo=" + encodeURIComponent(r.path)); // warms the cache
     S.takeover = false;
     applyTakeover();

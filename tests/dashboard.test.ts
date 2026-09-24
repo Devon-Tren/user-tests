@@ -477,3 +477,51 @@ test("free mode answers structural questions and refuses behavioural ones", asyn
 
   assert.deepEqual(errors, []);
 });
+
+// S and archQuery are lexical top-level bindings in the page (`const`), so they
+// are NOT properties of globalThis and can only be reached by bare name inside
+// page.evaluate. Keep no function definitions in there either: esbuild names
+// them and injects a __name helper the browser context does not have.
+declare const S: { run: unknown; freeRepo: unknown };
+declare function pickAndMap(btn: unknown): Promise<void>;
+declare function archQuery(extra?: string): string;
+
+test("mapping a codebase leaves no run selected, so the graph is the one you asked for", async (t) => {
+  const { root } = makeDashboardProject();
+  const server = createDashboardServer({ projectRoot: root, port: 0, log: () => {}, token: "tok", browseRoot: root });
+  await new Promise<void>((resolve, reject) => server.listen(0, "127.0.0.1", resolve).once("error", reject));
+  t.after(() => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }));
+  const port = (server.address() as AddressInfo).port;
+
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await returningVisitor(page);
+
+  // Stand in for the OS folder dialog, and for the map itself: this test is
+  // about which repo the dashboard then asks for, not about mapd.
+  await page.route("**/api/fs/pick", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ path: "/tmp/freshly-picked" }) })
+  );
+  await page.route("**/api/architecture**", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: "{}" })
+  );
+
+  await page.goto(`http://127.0.0.1:${port}/?run=${TEST_RUN}&tab=start`, { waitUntil: "domcontentloaded" });
+
+  // The mode picker also appears when a key is missing but runs exist, so a run
+  // can still be selected when someone asks to map an unrelated folder.
+  const result = await page.evaluate(async () => {
+    S.run = { dir: "some-old-run" };
+    const btn = document.createElement("button");
+    btn.textContent = "map";
+    document.body.appendChild(btn);
+    await pickAndMap(btn);
+    return { run: S.run, freeRepo: S.freeRepo, query: archQuery() };
+  });
+
+  assert.equal(result.run, null, "the stale run is cleared");
+  assert.equal(result.freeRepo, "/tmp/freshly-picked", "the picked repo is the one recorded");
+  assert.match(result.query, /^\?repo=/, "the graph is fetched by repo, not by the old run's dir");
+  assert.doesNotMatch(result.query, /some-old-run/, "no trace of the run that was selected before");
+});
